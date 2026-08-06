@@ -61,50 +61,29 @@
                 </div>
 
                 <div class="navbar-nav w-100">
-                    <a href="{{ url_for('main.dashboard') }}" class="nav-item nav-link {{ 'active' if request.endpoint == 'main.dashboard' }}">
-                        <i class="fa fa-tachometer-alt me-2"></i>Dashboard
-                    </a>
-                    <a href="#" class="nav-item nav-link"><i class="fas fa-list-alt me-2"></i>Purchase Request</a>
-
-                    <div class="nav-item dropdown">
-                        <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown"><i class="fa fa-cart-arrow-down me-3"></i>Purchase Order</a>
-                        <div class="dropdown-menu bg-transparent border-0 px-4">
-                            <a href="#" class="dropdown-item"><i class="fas fa-edit me-2"></i>Orders</a>
-                            <a href="#" class="dropdown-item"><i class="fas fa-edit me-2"></i>Fuel PO</a>
-                        </div>
-                    </div>
-
-                    <div class="nav-item dropdown">
-                        <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown"><i class="fa fa-warehouse me-3"></i>Warehouse</a>
-                        <div class="dropdown-menu bg-transparent border-0 px-4">
-                            <a href="#" class="dropdown-item"><i class="fa fa-boxes me-2"></i>Stocks</a>
-                            <a href="#" class="dropdown-item"><i class="fa fa-handshake me-2"></i>Transactions</a>
-                        </div>
-                    </div>
-
-                    <div class="nav-item dropdown">
-                        <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown"><i class="fa fa-file-invoice me-3"></i>Receivables</a>
-                        <div class="dropdown-menu bg-transparent border-0 px-4">
-                            <a href="#" class="dropdown-item"><i class="fa fa-file-invoice-dollar me-2"></i>Collectibles</a>
-                            <a href="#" class="dropdown-item"><i class="fas fa-list-alt me-2"></i>Collections</a>
-                            <a href="#" class="dropdown-item"><i class="fas fa-list-alt me-2"></i>Statement of Account</a>
-                        </div>
-                    </div>
-
-                    <div class="nav-item dropdown">
-                        <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown"><i class="fa fa-truck me-3"></i>Delivery</a>
-                        <div class="dropdown-menu bg-transparent border-0 px-4">
-                            <a href="#" class="dropdown-item"><i class="fa fa-calendar me-2"></i>Schedules</a>
-                            <a href="#" class="dropdown-item"><i class="fa fa-calendar me-2"></i>Gatepass</a>
-                        </div>
-                    </div>
-
-                    <div class="nav-item dropdown">
-                        <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown"><i class="fa fa-table me-3"></i>Reports</a>
-                        <div class="dropdown-menu bg-transparent border-0 px-4">
-                            <a href="#" class="dropdown-item"><i class="fa fa-boxes me-2"></i>Downloadables</a>
-                        </div>
-                    </div>
+                    {% for item in nav_items %}
+                        {% if item.children %}
+                            {% set group_active = item.children | selectattr('slug', 'equalto', active_slug) | list | length > 0 %}
+                            <div class="nav-item dropdown {{ 'active' if group_active }}">
+                                <a href="#" class="nav-link dropdown-toggle {{ 'active show' if group_active }}" data-bs-toggle="dropdown" aria-expanded="{{ 'true' if group_active else 'false' }}">
+                                    <i class="fa {{ item.icon }} me-3"></i>{{ item.label }}
+                                </a>
+                                <div class="dropdown-menu bg-transparent border-0 px-4 {{ 'show' if group_active }}" data-bs-popper="none">
+                                    {% for child in item.children %}
+                                        <a href="{{ url_for('main.page', slug=child.slug) }}" class="dropdown-item {{ 'active' if child.slug == active_slug }}">
+                                            <i class="fa {{ child.icon }} me-2"></i>{{ child.label }}
+                                        </a>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        {% else %}
+                            {% set href = url_for(item.endpoint) if item.endpoint else url_for('main.page', slug=item.slug) %}
+                            {% set item_active = (item.endpoint and request.endpoint == item.endpoint) or (item.slug and item.slug == active_slug) %}
+                            <a href="{{ href }}" class="nav-item nav-link {{ 'active' if item_active }}">
+                                <i class="fa {{ item.icon }} me-2"></i>{{ item.label }}
+                            </a>
+                        {% endif %}
+                    {% endfor %}
                 </div>
             </nav>
         </div>

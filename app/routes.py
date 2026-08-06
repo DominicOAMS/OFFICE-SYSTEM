@@ -1,6 +1,8 @@
 from functools import wraps
 
-from flask import Blueprint, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, redirect, render_template, request, session, url_for
+
+from .nav import flatten_slugs
 
 main_bp = Blueprint("main", __name__)
 
@@ -44,3 +46,12 @@ def logout():
 @login_required
 def dashboard():
     return render_template("dashboard.html")
+
+
+@main_bp.route("/page/<slug>")
+@login_required
+def page(slug):
+    item = flatten_slugs().get(slug)
+    if not item:
+        abort(404)
+    return render_template("placeholder.html", page_title=item["label"], page_icon=item["icon"])
