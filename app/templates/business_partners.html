@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+
+{% block title %}Customers & Suppliers - Office System{% endblock %}
+
+{% block content %}
+<div class="container-fluid pt-4 px-4">
+    <div class="bg-light rounded p-4">
+        <div class="d-flex align-items-center justify-content-between mb-4">
+            <h5 class="mb-0"><i class="fa fa-address-book text-primary me-2"></i>Customers &amp; Suppliers</h5>
+            <button type="button" class="btn btn-primary" id="addNewBtn"><i class="fa fa-plus me-2"></i>Add New</button>
+        </div>
+
+        <div class="btn-group mb-3" role="group" id="partnerFilter">
+            <button type="button" class="btn btn-outline-primary active" data-filter="all">All</button>
+            <button type="button" class="btn btn-outline-primary" data-filter="customer">Customers</button>
+            <button type="button" class="btn btn-outline-primary" data-filter="supplier">Suppliers</button>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Name</th>
+                        <th>Contact Person</th>
+                        <th>Phone</th>
+                        <th>Type</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    <tr data-type="customer">
+                        <td>1</td>
+                        <td>St. Luke's Medical Center</td>
+                        <td>Dr. Ana Reyes</td>
+                        <td>(02) 8123 4567</td>
+                        <td><span class="badge bg-primary">Customer</span></td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-primary btn-sm-square js-edit"><i class="fa fa-edit"></i></button>
+                            <button type="button" class="btn btn-danger btn-sm-square js-delete"><i class="fa fa-trash"></i></button>
+                        </td>
+                    </tr>
+                    <tr data-type="customer">
+                        <td>2</td>
+                        <td>Makati Medical Center</td>
+                        <td>Nurse Ben Santos</td>
+                        <td>(02) 8234 5678</td>
+                        <td><span class="badge bg-primary">Customer</span></td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-primary btn-sm-square js-edit"><i class="fa fa-edit"></i></button>
+                            <button type="button" class="btn btn-danger btn-sm-square js-delete"><i class="fa fa-trash"></i></button>
+                        </td>
+                    </tr>
+                    <tr data-type="customer">
+                        <td>3</td>
+                        <td>Philippine General Hospital</td>
+                        <td>Dr. Carlo Villanueva</td>
+                        <td>(02) 8345 6789</td>
+                        <td><span class="badge bg-primary">Customer</span></td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-primary btn-sm-square js-edit"><i class="fa fa-edit"></i></button>
+                            <button type="button" class="btn btn-danger btn-sm-square js-delete"><i class="fa fa-trash"></i></button>
+                        </td>
+                    </tr>
+                    <tr data-type="supplier">
+                        <td>4</td>
+                        <td>MedSupply Philippines Inc.</td>
+                        <td>Grace Tan</td>
+                        <td>(02) 8456 7890</td>
+                        <td><span class="badge bg-dark">Supplier</span></td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-primary btn-sm-square js-edit"><i class="fa fa-edit"></i></button>
+                            <button type="button" class="btn btn-danger btn-sm-square js-delete"><i class="fa fa-trash"></i></button>
+                        </td>
+                    </tr>
+                    <tr data-type="supplier">
+                        <td>5</td>
+                        <td>PharmaCorp Distribution</td>
+                        <td>Mark Lim</td>
+                        <td>(02) 8567 8901</td>
+                        <td><span class="badge bg-dark">Supplier</span></td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-primary btn-sm-square js-edit"><i class="fa fa-edit"></i></button>
+                            <button type="button" class="btn btn-danger btn-sm-square js-delete"><i class="fa fa-trash"></i></button>
+                        </td>
+                    </tr>
+                    <tr data-type="supplier">
+                        <td>6</td>
+                        <td>Global Health Equipment Co.</td>
+                        <td>Julia Cruz</td>
+                        <td>(02) 8678 9012</td>
+                        <td><span class="badge bg-dark">Supplier</span></td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-primary btn-sm-square js-edit"><i class="fa fa-edit"></i></button>
+                            <button type="button" class="btn btn-danger btn-sm-square js-delete"><i class="fa fa-trash"></i></button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="text-muted mb-0" id="emptyState" style="display:none;">No records match this filter.</p>
+        <p class="text-muted mb-0">This is a design placeholder for the <strong>Customers &amp; Suppliers</strong> module &mdash; no database is connected yet. Add/Edit/Delete work visually here, but nothing is saved; reloading the page resets it back to the sample rows.</p>
+    </div>
+</div>
+
+<div class="modal fade" id="recordModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="recordModalTitle">Add New</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="recordForm">
+                    <div class="mb-3">
+                        <label class="form-label" for="fieldName">Name</label>
+                        <input type="text" class="form-control" id="fieldName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="fieldContact">Contact Person</label>
+                        <input type="text" class="form-control" id="fieldContact">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="fieldPhone">Phone</label>
+                        <input type="text" class="form-control" id="fieldPhone">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="fieldType">Type</label>
+                        <select class="form-select" id="fieldType">
+                            <option value="customer">Customer</option>
+                            <option value="supplier">Supplier</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="recordSaveBtn">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Delete</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-0">Are you sure you want to delete this record?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var modalEl = document.getElementById('recordModal');
+        var modal = new bootstrap.Modal(modalEl);
+        var deleteModal = new bootstrap.Modal(document.getElementById('deleteConfirmModal'));
+        var tbody = document.getElementById('recordsBody');
+        var fieldName = document.getElementById('fieldName');
+        var fieldContact = document.getElementById('fieldContact');
+        var fieldPhone = document.getElementById('fieldPhone');
+        var fieldType = document.getElementById('fieldType');
+        var modalTitle = document.getElementById('recordModalTitle');
+        var emptyState = document.getElementById('emptyState');
+        var editingRow = null;
+        var rowPendingDelete = null;
+        var nextId = tbody.querySelectorAll('tr').length + 1;
+
+        function typeLabel(type) {
+            return type === 'supplier' ? 'Supplier' : 'Customer';
+        }
+
+        function typeBadgeClass(type) {
+            return type === 'supplier' ? 'bg-dark' : 'bg-primary';
+        }
+
+        function currentFilter() {
+            var active = document.querySelector('#partnerFilter .active');
+            return active ? active.getAttribute('data-filter') : 'all';
+        }
+
+        function applyFilter() {
+            var filter = currentFilter();
+            var visibleCount = 0;
+            tbody.querySelectorAll('tr[data-type]').forEach(function (row) {
+                var show = filter === 'all' || row.getAttribute('data-type') === filter;
+                row.style.display = show ? '' : 'none';
+                if (show) visibleCount++;
+            });
+            emptyState.style.display = visibleCount === 0 ? '' : 'none';
+        }
+
+        document.querySelectorAll('#partnerFilter [data-filter]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                document.querySelectorAll('#partnerFilter [data-filter]').forEach(function (b) { b.classList.remove('active'); });
+                btn.classList.add('active');
+                applyFilter();
+            });
+        });
+
+        function buildActionsCell() {
+            var td = document.createElement('td');
+            td.className = 'text-end';
+            td.innerHTML =
+                '<button type="button" class="btn btn-primary btn-sm-square js-edit"><i class="fa fa-edit"></i></button> ' +
+                '<button type="button" class="btn btn-danger btn-sm-square js-delete"><i class="fa fa-trash"></i></button>';
+            return td;
+        }
+
+        function openAdd() {
+            editingRow = null;
+            modalTitle.textContent = 'Add New';
+            fieldName.value = '';
+            fieldContact.value = '';
+            fieldPhone.value = '';
+            fieldType.value = 'customer';
+            modal.show();
+        }
+
+        function openEdit(row) {
+            editingRow = row;
+            modalTitle.textContent = 'Edit Record';
+            fieldName.value = row.cells[1].textContent.trim();
+            fieldContact.value = row.cells[2].textContent.trim();
+            fieldPhone.value = row.cells[3].textContent.trim();
+            fieldType.value = row.getAttribute('data-type');
+            modal.show();
+        }
+
+        document.getElementById('addNewBtn').addEventListener('click', openAdd);
+
+        tbody.addEventListener('click', function (e) {
+            var editBtn = e.target.closest('.js-edit');
+            var delBtn = e.target.closest('.js-delete');
+            if (editBtn) openEdit(editBtn.closest('tr'));
+            if (delBtn) {
+                rowPendingDelete = delBtn.closest('tr');
+                deleteModal.show();
+            }
+        });
+
+        document.getElementById('confirmDeleteBtn').addEventListener('click', function () {
+            if (rowPendingDelete) {
+                rowPendingDelete.remove();
+                rowPendingDelete = null;
+            }
+            deleteModal.hide();
+            applyFilter();
+        });
+
+        document.getElementById('recordSaveBtn').addEventListener('click', function () {
+            var name = fieldName.value.trim();
+            var contact = fieldContact.value.trim();
+            var phone = fieldPhone.value.trim();
+            var type = fieldType.value;
+            if (!name) {
+                fieldName.focus();
+                return;
+            }
+
+            if (editingRow) {
+                editingRow.setAttribute('data-type', type);
+                editingRow.cells[1].textContent = name;
+                editingRow.cells[2].textContent = contact;
+                editingRow.cells[3].textContent = phone;
+                var badge = editingRow.querySelector('.badge');
+                badge.textContent = typeLabel(type);
+                badge.className = 'badge ' + typeBadgeClass(type);
+            } else {
+                var tr = document.createElement('tr');
+                tr.setAttribute('data-type', type);
+
+                var tdId = document.createElement('td');
+                tdId.textContent = nextId++;
+
+                var tdName = document.createElement('td');
+                tdName.textContent = name;
+
+                var tdContact = document.createElement('td');
+                tdContact.textContent = contact;
+
+                var tdPhone = document.createElement('td');
+                tdPhone.textContent = phone;
+
+                var tdType = document.createElement('td');
+                var badgeEl = document.createElement('span');
+                badgeEl.className = 'badge ' + typeBadgeClass(type);
+                badgeEl.textContent = typeLabel(type);
+                tdType.appendChild(badgeEl);
+
+                tr.appendChild(tdId);
+                tr.appendChild(tdName);
+                tr.appendChild(tdContact);
+                tr.appendChild(tdPhone);
+                tr.appendChild(tdType);
+                tr.appendChild(buildActionsCell());
+
+                tbody.appendChild(tr);
+            }
+
+            modal.hide();
+            applyFilter();
+        });
+    })();
+</script>
+{% endblock %}

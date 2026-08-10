@@ -48,6 +48,12 @@ def dashboard():
     return render_template("dashboard.html")
 
 
+@main_bp.route("/page/parameters_business_partners")
+@login_required
+def business_partners():
+    return render_template("business_partners.html")
+
+
 @main_bp.route("/page/<slug>")
 @login_required
 def page(slug):

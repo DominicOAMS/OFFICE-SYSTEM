@@ -17,20 +17,14 @@ NAV_ITEMS = [
             {"label": "Transactions", "icon": "fa-handshake", "slug": "warehouse_transactions"},
         ],
     },
+    {"label": "Invoices", "icon": "fa-file-alt", "slug": "invoice_invoices"},
     {
-        "label": "Invoice",
-        "icon": "fa-file-alt",
-        "children": [
-            {"label": "Invoices", "icon": "fa-file-invoice-dollar", "slug": "invoice_invoices"},
-            {"label": "Delivery Receipt", "icon": "fa-list-alt", "slug": "invoice_delivery_receipt"},
-        ],
-    },
-    {
-        "label": "Logistics",
+        "label": "Delivery",
         "icon": "fa-truck",
         "children": [
-            {"label": "Schedules", "icon": "fa-calendar", "slug": "logistics_schedules"},
-            {"label": "Gatepass", "icon": "fa-calendar", "slug": "logistics_gatepass"},
+            {"label": "Schedules", "icon": "fa-calendar", "slug": "delivery_schedules"},
+            {"label": "Gatepass", "icon": "fa-door-open", "slug": "delivery_gatepass"},
+            {"label": "Delivery Receipt", "icon": "fa-list-alt", "slug": "delivery_receipt"},
         ],
     },
     {
@@ -51,13 +45,7 @@ NAV_ITEMS = [
             {"label": "Statement of Account", "icon": "fa-list-alt", "slug": "receivables_soa"},
         ],
     },
-    {
-        "label": "Reports",
-        "icon": "fa-clone",
-        "children": [
-            {"label": "Downloadables", "icon": "fa-boxes", "slug": "reports_downloadables"},
-        ],
-    },
+    {"label": "Reports", "icon": "fa-clone", "slug": "reports_downloadables"},
     {
         "label": "Consignment",
         "icon": "fa-id-badge",
@@ -71,8 +59,7 @@ NAV_ITEMS = [
         "label": "Parameters",
         "icon": "fa-wrench",
         "children": [
-            {"label": "Customers", "icon": "fa-dot-circle", "slug": "parameters_customers"},
-            {"label": "Suppliers", "icon": "fa-dot-circle", "slug": "parameters_suppliers"},
+            {"label": "Customers & Suppliers", "icon": "fa-address-book", "slug": "parameters_business_partners"},
             {"label": "Users", "icon": "fa-dot-circle", "slug": "parameters_users"},
             {"label": "Inventory Items", "icon": "fa-dot-circle", "slug": "parameters_inventory_items"},
         ],
