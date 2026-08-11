@@ -1,0 +1,320 @@
+from .db import get_connection
+
+
+def list_active_customers():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.*, COUNT(cp.id) AS productCount
+                FROM tbl_customers c
+                LEFT JOIN tbl_customers_products cp ON cp.customerId = c.id AND cp.isDeleted = 0
+                WHERE c.isDeleted = 0
+                GROUP BY c.id
+                ORDER BY c.name ASC, c.id ASC
+                """
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def get_customer(customer_id):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM tbl_customers WHERE id = %s LIMIT 1", (customer_id,))
+            return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def find_active_by_code(code):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM tbl_customers WHERE code = %s AND isDeleted = 0 LIMIT 1",
+                (code,),
+            )
+            return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def list_distinct_customer_types():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT customerType FROM tbl_customers
+                WHERE isDeleted = 0 AND customerType IS NOT NULL AND customerType <> ''
+                ORDER BY customerType ASC
+                """
+            )
+            return [row["customerType"] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def list_distinct_sales_reps():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT salesRep FROM tbl_customers
+                WHERE isDeleted = 0 AND salesRep IS NOT NULL AND salesRep <> ''
+                ORDER BY salesRep ASC
+                """
+            )
+            return [row["salesRep"] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def create_customer(data, created_by):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO tbl_customers
+                    (code, name, address, tin, paymentTermDays, salesRep, customerType, vpSupplierId,
+                     isDeleted, createdBy, createdAt, updatedBy, updatedAt)
+                VALUES
+                    (%s, %s, %s, %s, %s, %s, %s, %s,
+                     0, %s, NOW(), %s, NOW())
+                """,
+                (
+                    data["code"],
+                    data["name"],
+                    data["address"],
+                    data["tin"],
+                    data["paymentTermDays"],
+                    data["salesRep"],
+                    data["customerType"],
+                    data["vpSupplierId"],
+                    created_by,
+                    created_by,
+                ),
+            )
+            return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def update_customer(customer_id, data, updated_by):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tbl_customers
+                SET code = %s, name = %s, address = %s, tin = %s, paymentTermDays = %s,
+                    salesRep = %s, customerType = %s, vpSupplierId = %s,
+                    updatedBy = %s, updatedAt = NOW()
+                WHERE id = %s
+                """,
+                (
+                    data["code"],
+                    data["name"],
+                    data["address"],
+                    data["tin"],
+                    data["paymentTermDays"],
+                    data["salesRep"],
+                    data["customerType"],
+                    data["vpSupplierId"],
+                    updated_by,
+                    customer_id,
+                ),
+            )
+    finally:
+        conn.close()
+
+
+def soft_delete_customer(customer_id, updated_by):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tbl_customers
+                SET isDeleted = 1, updatedBy = %s, updatedAt = NOW()
+                WHERE id = %s
+                """,
+                (updated_by, customer_id),
+            )
+    finally:
+        conn.close()
+
+
+def list_products_for_customer(customer_id):
+    """Current price per (catalog, priceCode, unit): the most recent row whose
+    effectiveDate has already arrived (highest id breaks ties between rows
+    sharing the same date, e.g. exact historical duplicates). Every prior price
+    stays in the table as read-only history and simply stops being "the" row
+    shown here once a newer one takes effect — matching the legacy system's
+    price-history model."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT cp.* FROM tbl_customers_products cp
+                WHERE cp.customerId = %s AND cp.isDeleted = 0
+                    AND (cp.effectiveDate IS NULL OR cp.effectiveDate <= CURDATE())
+                    AND NOT EXISTS (
+                        SELECT 1 FROM tbl_customers_products cp2
+                        WHERE cp2.customerId = cp.customerId
+                            AND cp2.catalog = cp.catalog
+                            AND cp2.priceCode <=> cp.priceCode
+                            AND cp2.unit <=> cp.unit
+                            AND cp2.isDeleted = 0
+                            AND (cp2.effectiveDate IS NULL OR cp2.effectiveDate <= CURDATE())
+                            AND (
+                                COALESCE(cp2.effectiveDate, '1900-01-01') > COALESCE(cp.effectiveDate, '1900-01-01')
+                                OR (
+                                    COALESCE(cp2.effectiveDate, '1900-01-01') = COALESCE(cp.effectiveDate, '1900-01-01')
+                                    AND cp2.id > cp.id
+                                )
+                            )
+                    )
+                ORDER BY cp.id DESC
+                """,
+                (customer_id,),
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def product_price_exists(customer_id, data):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1 FROM tbl_customers_products
+                WHERE customerId = %s AND isDeleted = 0
+                    AND catalog <=> %s AND priceCode <=> %s AND unit <=> %s
+                    AND category <=> %s AND price <=> %s AND effectiveDate <=> %s
+                LIMIT 1
+                """,
+                (
+                    customer_id,
+                    data["catalog"],
+                    data["priceCode"],
+                    data["unit"],
+                    data["category"],
+                    data["price"],
+                    data["effectiveDate"],
+                ),
+            )
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def list_price_codes_for_customer(customer_id):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT priceCode FROM tbl_customers_products
+                WHERE customerId = %s AND isDeleted = 0 AND priceCode IS NOT NULL AND priceCode <> ''
+                ORDER BY priceCode ASC
+                """,
+                (customer_id,),
+            )
+            return [row["priceCode"] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def list_active_inventory_items():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT catalog, description, category, groupType, baseUnit, salesUnit, purchaseUnit
+                FROM tbl_inventory_items
+                WHERE isDeleted = 0 AND status = 'AC'
+                ORDER BY catalog ASC
+                """
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def list_allowed_units():
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT unit FROM tbl_customers_products WHERE isDeleted = 0 AND unit IS NOT NULL AND unit <> ''
+                UNION
+                SELECT baseUnit FROM tbl_inventory_items WHERE isDeleted = 0 AND baseUnit IS NOT NULL AND baseUnit <> ''
+                UNION
+                SELECT salesUnit FROM tbl_inventory_items WHERE isDeleted = 0 AND salesUnit IS NOT NULL AND salesUnit <> ''
+                UNION
+                SELECT purchaseUnit FROM tbl_inventory_items WHERE isDeleted = 0 AND purchaseUnit IS NOT NULL AND purchaseUnit <> ''
+                ORDER BY unit ASC
+                """
+            )
+            return [row["unit"] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def create_product(customer_id, data, created_by):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO tbl_customers_products
+                    (customerId, priceCode, catalog, customerDescription, category, unit, price,
+                     effectiveDate, isDeleted, createdBy, createdAt, updatedBy, updatedAt)
+                VALUES
+                    (%s, %s, %s, %s, %s, %s, %s,
+                     %s, 0, %s, NOW(), %s, NOW())
+                """,
+                (
+                    customer_id,
+                    data["priceCode"],
+                    data["catalog"],
+                    data["customerDescription"],
+                    data["category"],
+                    data["unit"],
+                    data["price"],
+                    data["effectiveDate"],
+                    created_by,
+                    created_by,
+                ),
+            )
+            return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def soft_delete_product(product_id, updated_by):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tbl_customers_products
+                SET isDeleted = 1, updatedBy = %s, updatedAt = NOW()
+                WHERE id = %s
+                """,
+                (updated_by, product_id),
+            )
+    finally:
+        conn.close()

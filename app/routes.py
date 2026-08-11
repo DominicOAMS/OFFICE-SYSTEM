@@ -1,9 +1,10 @@
 from functools import wraps
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, session, url_for
+from pymysql.err import IntegrityError
 from werkzeug.security import check_password_hash
 
-from . import program_menu_repo, users_repo
+from . import customers_repo, program_menu_repo, users_repo
 from .nav import flatten_slugs
 from .security import DEFAULT_PASSWORD, PASSWORD_REQUIREMENTS, is_valid_password
 
@@ -94,10 +95,131 @@ def dashboard():
     return render_template("dashboard.html")
 
 
-@main_bp.route("/page/parameters_business_partners")
+def _parse_customer_form():
+    payment_term_days = request.form.get("paymentTermDays", "").strip()
+    return {
+        "code": request.form.get("code", "").strip(),
+        "name": request.form.get("name", "").strip(),
+        "address": request.form.get("address", "").strip() or None,
+        "tin": request.form.get("tin", "").strip() or None,
+        "paymentTermDays": int(payment_term_days) if payment_term_days.isdigit() else 0,
+        "salesRep": request.form.get("salesRep", "").strip() or None,
+        "customerType": request.form.get("customerType", "").strip() or None,
+        "vpSupplierId": request.form.get("vpSupplierId", "").strip() or None,
+    }
+
+
+@main_bp.route("/page/parameters_customers")
 @login_required
-def business_partners():
-    return render_template("business_partners.html")
+def customers():
+    records = customers_repo.list_active_customers()
+    customer_types = customers_repo.list_distinct_customer_types()
+    sales_reps = customers_repo.list_distinct_sales_reps()
+    return render_template(
+        "customers.html", customers=records, customer_types=customer_types, sales_reps=sales_reps
+    )
+
+
+@main_bp.route("/page/parameters_customers/add", methods=["POST"])
+@login_required
+def customers_add():
+    data = _parse_customer_form()
+    if not data["code"] or not data["name"]:
+        flash("Customer code and name are required.", "error")
+        return redirect(url_for("main.customers"))
+
+    try:
+        customers_repo.create_customer(data, created_by=session.get("user_id"))
+    except IntegrityError:
+        flash(f'Customer code "{data["code"]}" is already in use.', "error")
+        return redirect(url_for("main.customers"))
+
+    flash("Customer created.", "success")
+    return redirect(url_for("main.customers"))
+
+
+@main_bp.route("/page/parameters_customers/<int:customer_id>/edit", methods=["POST"])
+@login_required
+def customers_edit(customer_id):
+    data = _parse_customer_form()
+    if not data["code"] or not data["name"]:
+        flash("Customer code and name are required.", "error")
+        return redirect(url_for("main.customers"))
+
+    try:
+        customers_repo.update_customer(customer_id, data, updated_by=session.get("user_id"))
+    except IntegrityError:
+        flash(f'Customer code "{data["code"]}" is already in use.', "error")
+        return redirect(url_for("main.customers"))
+
+    flash("Customer updated.", "success")
+    return redirect(url_for("main.customers"))
+
+
+@main_bp.route("/page/parameters_customers/<int:customer_id>/delete", methods=["POST"])
+@login_required
+def customers_delete(customer_id):
+    customers_repo.soft_delete_customer(customer_id, updated_by=session.get("user_id"))
+    flash("Customer deleted.", "success")
+    return redirect(url_for("main.customers"))
+
+
+def _parse_product_form():
+    price = request.form.get("price", "").strip()
+    effective_date = request.form.get("effectiveDate", "").strip()
+    return {
+        "priceCode": request.form.get("priceCode", "").strip() or None,
+        "catalog": request.form.get("catalog", "").strip(),
+        "customerDescription": request.form.get("customerDescription", "").strip() or None,
+        "category": request.form.get("category", "").strip() or None,
+        "unit": request.form.get("unit", "").strip() or None,
+        "price": price or None,
+        "effectiveDate": effective_date or None,
+    }
+
+
+@main_bp.route("/page/parameters_customers/<int:customer_id>/products")
+@login_required
+def customer_products(customer_id):
+    customer = customers_repo.get_customer(customer_id)
+    if not customer:
+        abort(404)
+    products = customers_repo.list_products_for_customer(customer_id)
+    units = customers_repo.list_allowed_units()
+    price_codes = customers_repo.list_price_codes_for_customer(customer_id)
+    inventory_items = customers_repo.list_active_inventory_items()
+    return render_template(
+        "customer_products.html",
+        customer=customer,
+        products=products,
+        units=units,
+        price_codes=price_codes,
+        inventory_items=inventory_items,
+    )
+
+
+@main_bp.route("/page/parameters_customers/<int:customer_id>/products/add", methods=["POST"])
+@login_required
+def customer_products_add(customer_id):
+    data = _parse_product_form()
+    if not data["catalog"] or not data["price"] or not data["customerDescription"]:
+        flash("Catalog, description, and price are required.", "error")
+        return redirect(url_for("main.customer_products", customer_id=customer_id))
+    if customers_repo.product_price_exists(customer_id, data):
+        flash("That exact price (same catalog, price code, unit, price, and effective date) is already on file.", "error")
+        return redirect(url_for("main.customer_products", customer_id=customer_id))
+
+    customers_repo.create_product(customer_id, data, created_by=session.get("user_id"))
+    flash("Product price added.", "success")
+    return redirect(url_for("main.customer_products", customer_id=customer_id))
+
+
+@main_bp.route("/page/parameters_customers/<int:customer_id>/products/<int:product_id>/delete", methods=["POST"])
+@login_required
+def customer_products_delete(customer_id, product_id):
+    customers_repo.soft_delete_product(product_id, updated_by=session.get("user_id"))
+    flash("Product deleted.", "success")
+    return redirect(url_for("main.customer_products", customer_id=customer_id))
 
 
 @main_bp.route("/page/parameters_users")

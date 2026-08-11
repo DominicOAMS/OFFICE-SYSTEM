@@ -59,7 +59,8 @@ NAV_ITEMS = [
         "label": "Parameters",
         "icon": "settings",
         "children": [
-            {"label": "Customers & Suppliers", "icon": "contact", "slug": "parameters_business_partners"},
+            {"label": "Customers", "icon": "contact", "slug": "parameters_customers"},
+            {"label": "Suppliers", "icon": "truck", "slug": "parameters_suppliers"},
             {"label": "Users", "icon": "users", "slug": "parameters_users"},
             {"label": "Inventory Items", "icon": "boxes", "slug": "parameters_inventory_items"},
         ],

@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+
+{% block title %}Customers - Office System{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="contact" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Customers</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    Customer master list and their product price lists.
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" data-modal-open="recordModal" id="addNewBtn">
+            <i data-lucide="user-plus" class="h-4 w-4"></i>
+            Add New
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="building-2" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Customers
+            </h2>
+            <div class="flex items-center gap-2">
+                <div class="relative">
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" id="customerSearch" placeholder="Search code, name, sales rep…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </div>
+                <span class="badge badge-slate whitespace-nowrap"><span id="customerCount">{{ customers|length }}</span> customers</span>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[56rem]">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th">Customer</th>
+                        <th class="table-th">Type</th>
+                        <th class="table-th">Sales Rep</th>
+                        <th class="table-th w-32">Terms</th>
+                        <th class="table-th w-28">Products</th>
+                        <th class="table-th w-40 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for c in customers %}
+                    <tr class="table-row"
+                        data-id="{{ c.id }}"
+                        data-code="{{ c.code or '' }}"
+                        data-name="{{ c.name or '' }}"
+                        data-address="{{ c.address or '' }}"
+                        data-tin="{{ c.tin or '' }}"
+                        data-payment-term-days="{{ c.paymentTermDays }}"
+                        data-sales-rep="{{ c.salesRep or '' }}"
+                        data-customer-type="{{ c.customerType or '' }}"
+                        data-vp-supplier-id="{{ c.vpSupplierId or '' }}">
+                        <td class="table-td">
+                            <div class="min-w-0">
+                                <p class="truncate font-medium text-slate-900 dark:text-white">{{ c.name }}</p>
+                                <p class="truncate font-mono text-xs text-slate-500 dark:text-slate-400">{{ c.code }}</p>
+                            </div>
+                        </td>
+                        <td class="table-td">
+                            {% if c.customerType %}
+                                <span class="badge {{ 'badge-accent' if c.customerType == 'GOVERNMENT' else 'badge-slate' }}">{{ c.customerType }}</span>
+                            {% else %}
+                                <span class="text-slate-300 dark:text-slate-600">&mdash;</span>
+                            {% endif %}
+                        </td>
+                        <td class="table-td">{{ c.salesRep or '—' }}</td>
+                        <td class="table-td">{{ c.paymentTermDays }} days</td>
+                        <td class="table-td">
+                            <a href="{{ url_for('main.customer_products', customer_id=c.id) }}"
+                               class="badge badge-brand hover:ring-2 hover:ring-brand-600/30">
+                                <i data-lucide="package" class="h-3 w-3"></i>{{ c.productCount }}
+                            </a>
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <a href="{{ url_for('main.customer_products', customer_id=c.id) }}"
+                                   class="btn btn-icon btn-ghost" title="Product price list" aria-label="Product price list">
+                                    <i data-lucide="package-search" class="h-4 w-4"></i>
+                                </a>
+                                <button type="button" class="btn btn-icon btn-ghost js-edit" title="Edit" aria-label="Edit customer">
+                                    <i data-lucide="pencil" class="h-4 w-4"></i>
+                                </button>
+                                <button type="button"
+                                        class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-delete"
+                                        title="Delete" aria-label="Delete customer">
+                                    <i data-lucide="trash-2" class="h-4 w-4"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="contact" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No customers yet</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div id="noSearchResults" class="hidden px-5 py-14 text-center">
+            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                <i data-lucide="search-x" class="h-6 w-6"></i>
+            </span>
+            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No customers match your search</p>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Add / Edit customer modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-3xl">
+        <form id="recordForm" method="POST" action="{{ url_for('main.customers_add') }}">
+            <div class="modal-header">
+                <h3 class="modal-title" id="recordModalTitle">Add New Customer</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-5">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                        <label class="label" for="fieldCode">Code <span class="text-accent-600">*</span></label>
+                        <input type="text" class="input" id="fieldCode" name="code" required>
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="label" for="fieldName">Name <span class="text-accent-600">*</span></label>
+                        <input type="text" class="input" id="fieldName" name="name" required>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldPaymentTermDays">Payment Terms (days)</label>
+                        <input type="number" min="0" class="input" id="fieldPaymentTermDays" name="paymentTermDays" value="0">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldCustomerType">Type</label>
+                        <input type="text" class="input" id="fieldCustomerType" name="customerType"
+                               list="customerTypeOptions" autocomplete="off" placeholder="e.g. PRIVATE">
+                        <datalist id="customerTypeOptions">
+                            {% for t in customer_types %}<option value="{{ t }}"></option>{% endfor %}
+                        </datalist>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldSalesRep">Sales Rep</label>
+                        <input type="text" class="input" id="fieldSalesRep" name="salesRep"
+                               list="salesRepOptions" autocomplete="off">
+                        <datalist id="salesRepOptions">
+                            {% for s in sales_reps %}<option value="{{ s }}"></option>{% endfor %}
+                        </datalist>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldTin">TIN</label>
+                        <input type="text" class="input" id="fieldTin" name="tin">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldVpSupplierId">VP Supplier ID</label>
+                        <input type="text" class="input" id="fieldVpSupplierId" name="vpSupplierId">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="label" for="fieldAddress">Address</label>
+                    <textarea class="input" id="fieldAddress" name="address" rows="2"></textarea>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i data-lucide="check" class="h-4 w-4"></i>Save
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== Delete confirm modal ===================== -->
+<div id="deleteConfirmModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="deleteForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title">Delete customer</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="px-5 py-5">
+                <div class="flex items-start gap-3">
+                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+                        <i data-lucide="triangle-alert" class="h-5 w-5"></i>
+                    </span>
+                    <div>
+                        <p class="text-sm font-medium text-slate-900 dark:text-white">
+                            Delete <span id="deleteTargetName">this customer</span>?
+                        </p>
+                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                            Their product price list stays on record but will no longer be shown.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-danger">
+                    <i data-lucide="trash-2" class="h-4 w-4"></i>Delete
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var recordForm = document.getElementById('recordForm');
+        var deleteForm = document.getElementById('deleteForm');
+        var modalTitle = document.getElementById('recordModalTitle');
+        var tbody = document.getElementById('recordsBody');
+        var addUrl = "{{ url_for('main.customers_add') }}";
+
+        function editUrl(id) { return '/page/parameters_customers/' + id + '/edit'; }
+        function deleteUrl(id) { return '/page/parameters_customers/' + id + '/delete'; }
+
+        function openAdd() {
+            recordForm.reset();
+            recordForm.action = addUrl;
+            document.getElementById('fieldPaymentTermDays').value = 0;
+            modalTitle.textContent = 'Add New Customer';
+            OS.openModal('recordModal');
+        }
+
+        function openEdit(row) {
+            recordForm.action = editUrl(row.getAttribute('data-id'));
+            document.getElementById('fieldCode').value = row.getAttribute('data-code');
+            document.getElementById('fieldName').value = row.getAttribute('data-name');
+            document.getElementById('fieldAddress').value = row.getAttribute('data-address');
+            document.getElementById('fieldTin').value = row.getAttribute('data-tin');
+            document.getElementById('fieldPaymentTermDays').value = row.getAttribute('data-payment-term-days') || 0;
+            document.getElementById('fieldSalesRep').value = row.getAttribute('data-sales-rep');
+            document.getElementById('fieldCustomerType').value = row.getAttribute('data-customer-type');
+            document.getElementById('fieldVpSupplierId').value = row.getAttribute('data-vp-supplier-id');
+            modalTitle.textContent = 'Edit Customer';
+            OS.openModal('recordModal');
+        }
+
+        document.getElementById('addNewBtn').addEventListener('click', openAdd);
+
+        tbody.addEventListener('click', function (e) {
+            var editBtn = e.target.closest('.js-edit');
+            var delBtn = e.target.closest('.js-delete');
+
+            if (editBtn) openEdit(editBtn.closest('tr'));
+
+            if (delBtn) {
+                var row = delBtn.closest('tr');
+                deleteForm.action = deleteUrl(row.getAttribute('data-id'));
+                document.getElementById('deleteTargetName').textContent = row.getAttribute('data-name') || 'this customer';
+                OS.openModal('deleteConfirmModal');
+            }
+        });
+
+        /* ----------------------------------------------------------- search */
+
+        var search = document.getElementById('customerSearch');
+        var noResults = document.getElementById('noSearchResults');
+
+        search.addEventListener('input', function () {
+            var term = search.value.trim().toLowerCase();
+            var shown = 0;
+            tbody.querySelectorAll('tr[data-id]').forEach(function (row) {
+                var haystack = (
+                    (row.getAttribute('data-code') || '') + ' ' +
+                    (row.getAttribute('data-name') || '') + ' ' +
+                    (row.getAttribute('data-sales-rep') || '')
+                ).toLowerCase();
+                var match = !term || haystack.indexOf(term) !== -1;
+                row.classList.toggle('hidden', !match);
+                if (match) shown++;
+            });
+            document.getElementById('customerCount').textContent = shown;
+            noResults.classList.toggle('hidden', shown > 0);
+        });
+    })();
+</script>
+{% endblock %}
