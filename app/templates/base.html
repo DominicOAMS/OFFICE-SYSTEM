@@ -1,163 +1,232 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full">
 
 <head>
     <meta charset="utf-8">
     <title>{% block title %}Office System{% endblock %}</title>
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
-
-    <!-- Favicon -->
     <link href="{{ url_for('static', filename='img/user.png') }}" rel="icon">
 
-    <!-- Google Web Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&display=swap" rel="stylesheet">
-
-    <!-- Icon Font Stylesheet -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.10.0/css/all.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.4.1/font/bootstrap-icons.css" rel="stylesheet">
-
-    <!-- Libraries Stylesheet -->
-    <link href="{{ url_for('static', filename='lib/owlcarousel/assets/owl.carousel.min.css') }}" rel="stylesheet">
-    <link href="{{ url_for('static', filename='lib/tempusdominus/css/tempusdominus-bootstrap-4.min.css') }}" rel="stylesheet" />
-
-    <!-- Customized Bootstrap Stylesheet -->
-    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
-
-    <!-- Template Stylesheet -->
-    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
-    <link href="{{ url_for('static', filename='css/password_toggle.css') }}" rel="stylesheet">
-
-    <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    {% include "_head.html" %}
 </head>
 
-<body>
-    <div class="container-xxl position-relative bg-white d-flex p-0">
+<body class="h-full bg-slate-50 text-slate-800 antialiased dark:bg-slate-950 dark:text-slate-200">
 
-        <!-- Sidebar Start -->
-        <div class="sidebar pe-4 pb-3">
-            <nav class="navbar navbar-light">
-                <a href="{{ url_for('main.dashboard') }}" class="navbar-brand mx-4 mb-3">
-                    <h3 class="text-primary text-white">One AMS APP</h3>
-                </a>
+    <!-- Mobile drawer backdrop -->
+    <div id="sidebarOverlay"
+         class="fixed inset-0 z-30 hidden bg-slate-900/50 backdrop-blur-sm lg:hidden"
+         aria-hidden="true"></div>
 
-                <div class="d-flex align-items-center ms-4 mb-4">
-                    <div class="position-relative">
-                        <img class="rounded-circle" src="{{ url_for('static', filename='img/user.png') }}" alt="" style="width: 40px; height: 40px;">
-                        <div class="bg-success rounded-circle border border-2 border-white position-absolute end-0 bottom-0 p-1"></div>
+    <!-- ============================ Sidebar ============================ -->
+    <aside id="sidebar"
+           class="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-brand-800 lg:flex
+                  dark:bg-slate-900 border-r border-brand-900/40 dark:border-slate-800">
+
+        <!-- Brand -->
+        <div class="flex h-16 shrink-0 items-center gap-2.5 px-5 border-b border-white/10">
+            <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-600 text-white shadow-sm">
+                <i data-lucide="hospital" class="h-5 w-5"></i>
+            </span>
+            <div class="min-w-0 leading-tight">
+                <p class="truncate text-sm font-semibold text-white">One AMS App</p>
+                <p class="truncate text-[11px] text-white/50">Office System</p>
+            </div>
+            <button type="button" data-sidebar-toggle
+                    class="ml-auto rounded-md p-1.5 text-white/70 hover:bg-white/10 hover:text-white lg:hidden"
+                    aria-label="Close navigation">
+                <i data-lucide="x" class="h-5 w-5"></i>
+            </button>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="flex-1 space-y-0.5 overflow-y-auto px-3 py-4 os-scroll">
+            {% for item in nav_items %}
+                {% if item.children %}
+                    {% set group_active = item.children | selectattr('slug', 'equalto', active_slug) | list | length > 0 %}
+                    <div data-nav-group data-open="{{ 'true' if group_active else 'false' }}">
+                        <button type="button" data-nav-group-toggle
+                                aria-expanded="{{ 'true' if group_active else 'false' }}"
+                                class="group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition
+                                       {% if group_active %}bg-white/10 text-white{% else %}text-white/70 hover:bg-white/5 hover:text-white{% endif %}">
+                            <i data-lucide="{{ item.icon }}" class="h-[18px] w-[18px] shrink-0"></i>
+                            <span class="flex-1 truncate text-left">{{ item.label }}</span>
+                            <i data-lucide="chevron-down" data-nav-chevron
+                               class="h-4 w-4 shrink-0 text-white/40 transition-transform duration-200 {{ 'rotate-180' if group_active }}"></i>
+                        </button>
+                        <div data-nav-group-panel class="mt-0.5 space-y-0.5 pl-4 {{ '' if group_active else 'hidden' }}">
+                            {% for child in item.children %}
+                                {% set child_active = child.slug == active_slug %}
+                                <a href="{{ url_for('main.page', slug=child.slug) }}"
+                                   class="flex items-center gap-2.5 rounded-lg border-l-2 py-2 pl-3.5 pr-3 text-[13px] transition
+                                          {% if child_active %}border-accent-400 bg-white/10 font-medium text-white{% else %}border-white/10 text-white/60 hover:border-white/30 hover:bg-white/5 hover:text-white{% endif %}">
+                                    <i data-lucide="{{ child.icon }}" class="h-4 w-4 shrink-0 opacity-80"></i>
+                                    <span class="truncate">{{ child.label }}</span>
+                                </a>
+                            {% endfor %}
+                        </div>
                     </div>
-                    <div class="ms-3">
-                        <h6 style="color:white;" class="mb-0">{{ session.get('user_name', 'Guest') }}</h6>
-                        <span style="color:white;">{{ session.get('user_type', '') }}</span>
+                {% else %}
+                    {% set href = url_for(item.endpoint) if item.endpoint else url_for('main.page', slug=item.slug) %}
+                    {% set item_active = (item.endpoint and request.endpoint == item.endpoint) or (item.slug and item.slug == active_slug) %}
+                    <a href="{{ href }}"
+                       class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition
+                              {% if item_active %}bg-white/10 text-white shadow-sm ring-1 ring-inset ring-white/10{% else %}text-white/70 hover:bg-white/5 hover:text-white{% endif %}">
+                        <i data-lucide="{{ item.icon }}" class="h-[18px] w-[18px] shrink-0"></i>
+                        <span class="flex-1 truncate">{{ item.label }}</span>
+                        {% if item_active %}<span class="h-1.5 w-1.5 rounded-full bg-accent-400"></span>{% endif %}
+                    </a>
+                {% endif %}
+            {% endfor %}
+        </nav>
+
+        <!-- Signed-in user -->
+        <div class="shrink-0 border-t border-white/10 p-3">
+            <div class="flex items-center gap-3 rounded-lg px-2 py-2">
+                <span class="relative shrink-0">
+                    <img src="{{ url_for('static', filename='img/user.png') }}" alt=""
+                         class="h-9 w-9 rounded-full object-cover ring-2 ring-white/20">
+                    <span class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-brand-800 bg-emerald-400 dark:border-slate-900"></span>
+                </span>
+                <div class="min-w-0 leading-tight">
+                    <p class="truncate text-[13px] font-medium text-white">{{ session.get('user_name', 'Guest') }}</p>
+                    <p class="truncate text-[11px] text-white/50">{{ session.get('user_type') or 'Signed in' }}</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ============================ Main ============================ -->
+    <div class="flex min-h-full flex-col lg:pl-64">
+
+        <!-- Topbar -->
+        <header class="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-3 border-b border-slate-200
+                       bg-white/85 px-4 backdrop-blur-md sm:px-6 dark:border-slate-800 dark:bg-slate-900/85">
+
+            <button type="button" data-sidebar-toggle
+                    class="-ml-1 rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 lg:hidden
+                           dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                    aria-label="Open navigation">
+                <i data-lucide="menu" class="h-5 w-5"></i>
+            </button>
+
+            <div class="relative hidden max-w-sm flex-1 sm:block">
+                <i data-lucide="search"
+                   class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                <input type="search" placeholder="Search…"
+                       class="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm
+                              placeholder:text-slate-400 focus:border-brand-500 focus:bg-white focus:outline-none
+                              focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-800
+                              dark:text-slate-200 dark:focus:bg-slate-800">
+            </div>
+
+            <div class="ml-auto flex items-center gap-1">
+
+                <!-- Theme -->
+                <button type="button" data-theme-toggle
+                        class="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900
+                               dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                        aria-label="Toggle dark mode" title="Toggle dark mode">
+                    <i data-lucide="moon" data-theme-icon class="h-[18px] w-[18px]"></i>
+                </button>
+
+                <!-- Notifications -->
+                <div class="relative" data-dropdown>
+                    <button type="button" data-dropdown-toggle aria-expanded="false"
+                            class="relative rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900
+                                   dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                            aria-label="Notifications">
+                        <i data-lucide="bell" class="h-[18px] w-[18px]"></i>
+                        <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-accent-500 ring-2 ring-white dark:ring-slate-900"></span>
+                    </button>
+                    <div data-dropdown-panel
+                         class="hidden absolute right-0 mt-2 w-72 origin-top-right overflow-hidden rounded-xl border
+                                border-slate-200 bg-white shadow-lg shadow-slate-900/5 dark:border-slate-700 dark:bg-slate-800">
+                        <p class="border-b border-slate-100 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide
+                                  text-slate-500 dark:border-slate-700 dark:text-slate-400">Notifications</p>
+                        <a href="#" class="flex gap-3 px-4 py-3 transition hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                            <span class="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
+                                <i data-lucide="triangle-alert" class="h-4 w-4"></i>
+                            </span>
+                            <span class="min-w-0">
+                                <span class="block text-sm font-medium text-slate-800 dark:text-slate-100">System Notification</span>
+                                <span class="block text-xs text-slate-500 dark:text-slate-400">Near-expiry / expired products</span>
+                            </span>
+                        </a>
                     </div>
                 </div>
 
-                <div class="navbar-nav w-100">
-                    {% for item in nav_items %}
-                        {% if item.children %}
-                            {% set group_active = item.children | selectattr('slug', 'equalto', active_slug) | list | length > 0 %}
-                            <div class="nav-item dropdown {{ 'active' if group_active }}">
-                                <a href="#" class="nav-link dropdown-toggle {{ 'active show' if group_active }}" data-bs-toggle="dropdown" aria-expanded="{{ 'true' if group_active else 'false' }}">
-                                    <i class="fa {{ item.icon }} me-3"></i>{{ item.label }}
-                                </a>
-                                <div class="dropdown-menu bg-transparent border-0 px-4 {{ 'show' if group_active }}" data-bs-popper="none">
-                                    {% for child in item.children %}
-                                        <a href="{{ url_for('main.page', slug=child.slug) }}" class="dropdown-item {{ 'active' if child.slug == active_slug }}">
-                                            <i class="fa {{ child.icon }} me-2"></i>{{ child.label }}
-                                        </a>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                        {% else %}
-                            {% set href = url_for(item.endpoint) if item.endpoint else url_for('main.page', slug=item.slug) %}
-                            {% set item_active = (item.endpoint and request.endpoint == item.endpoint) or (item.slug and item.slug == active_slug) %}
-                            <a href="{{ href }}" class="nav-item nav-link {{ 'active' if item_active }}">
-                                <i class="fa {{ item.icon }} me-2"></i>{{ item.label }}
-                            </a>
-                        {% endif %}
+                <div class="mx-1 hidden h-6 w-px bg-slate-200 sm:block dark:bg-slate-700"></div>
+
+                <!-- User menu -->
+                <div class="relative" data-dropdown>
+                    <button type="button" data-dropdown-toggle aria-expanded="false"
+                            class="flex items-center gap-2 rounded-lg p-1.5 pr-2 transition hover:bg-slate-100
+                                   dark:hover:bg-slate-800">
+                        <img src="{{ url_for('static', filename='img/user.png') }}" alt=""
+                             class="h-8 w-8 rounded-full object-cover ring-1 ring-slate-200 dark:ring-slate-700">
+                        <span class="hidden max-w-[10rem] truncate text-sm font-medium lg:block">
+                            {{ session.get('user_name', 'Guest') }}
+                        </span>
+                        <i data-lucide="chevron-down" class="hidden h-4 w-4 text-slate-400 lg:block"></i>
+                    </button>
+                    <div data-dropdown-panel
+                         class="hidden absolute right-0 mt-2 w-56 origin-top-right overflow-hidden rounded-xl border
+                                border-slate-200 bg-white py-1 shadow-lg shadow-slate-900/5 dark:border-slate-700 dark:bg-slate-800">
+                        <div class="border-b border-slate-100 px-4 py-2.5 dark:border-slate-700">
+                            <p class="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{{ session.get('user_name', 'Guest') }}</p>
+                            <p class="truncate text-xs text-slate-500 dark:text-slate-400">{{ session.get('user_email') or session.get('user_type') or '' }}</p>
+                        </div>
+                        <a href="{{ url_for('main.change_password') }}"
+                           class="flex items-center gap-2.5 px-4 py-2 text-sm text-slate-700 transition hover:bg-slate-50
+                                  dark:text-slate-300 dark:hover:bg-slate-700/50">
+                            <i data-lucide="key-round" class="h-4 w-4 text-slate-400"></i>Change Password
+                        </a>
+                        <a href="{{ url_for('main.logout') }}"
+                           class="flex items-center gap-2.5 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-50
+                                  dark:text-rose-400 dark:hover:bg-rose-500/10">
+                            <i data-lucide="log-out" class="h-4 w-4"></i>Log Out
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Flash messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="space-y-2 px-4 pt-4 sm:px-6">
+                    {% for category, message in messages %}
+                        {% set is_error = category == 'error' or category == 'danger' %}
+                        <div data-alert role="alert"
+                             class="flex items-start gap-3 rounded-xl border px-4 py-3 text-sm
+                                    {% if is_error %}border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300
+                                    {% else %}border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300{% endif %}">
+                            <i data-lucide="{{ 'circle-alert' if is_error else 'circle-check' }}" class="mt-0.5 h-4 w-4 shrink-0"></i>
+                            <span class="flex-1 break-words">{{ message }}</span>
+                            <button type="button" data-alert-dismiss class="shrink-0 opacity-60 transition hover:opacity-100" aria-label="Dismiss">
+                                <i data-lucide="x" class="h-4 w-4"></i>
+                            </button>
+                        </div>
                     {% endfor %}
                 </div>
-            </nav>
-        </div>
-        <!-- Sidebar End -->
+            {% endif %}
+        {% endwith %}
 
-        <!-- Content Start -->
-        <div class="content">
-
-            <!-- Navbar Start -->
-            <nav class="navbar navbar-expand bg-light navbar-light sticky-top px-4 py-0">
-                <a href="{{ url_for('main.dashboard') }}" class="navbar-brand d-flex d-lg-none me-4">
-                    <h2 class="text-primary mb-0"><i class="fa fa-hashtag"></i></h2>
-                </a>
-                <a href="#" class="sidebar-toggler flex-shrink-0">
-                    <i class="fa fa-bars"></i>
-                </a>
-                <form class="d-none d-md-flex ms-4">
-                    <input class="form-control border-0" type="search" placeholder="Search">
-                </form>
-                <div class="navbar-nav align-items-center ms-auto">
-                    <div class="nav-item dropdown">
-                        <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown">
-                            <i class="fa fa-bell me-lg-2"></i>
-                            <span class="d-none d-lg-inline-flex">Notification</span>
-                        </a>
-                        <div class="dropdown-menu dropdown-menu-end bg-light border-0 rounded-0 rounded-bottom m-0">
-                            <a href="#" class="dropdown-item">
-                                <h6 class="fw-normal mb-0 text-danger">System Notification</h6>
-                                <small>Near-Expiry/Expired Products</small>
-                            </a>
-                        </div>
-                    </div>
-                    <div class="nav-item dropdown">
-                        <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown">
-                            <img class="rounded-circle me-lg-2" src="{{ url_for('static', filename='img/user.png') }}" alt="" style="width: 40px; height: 40px;">
-                            <span class="d-none d-lg-inline-flex">{{ session.get('user_name', 'Guest') }}</span>
-                        </a>
-                        <div class="dropdown-menu dropdown-menu-end bg-light border-0 rounded-0 rounded-bottom m-0">
-                            <a href="{{ url_for('main.change_password') }}" class="dropdown-item">Change Password</a>
-                            <a href="{{ url_for('main.logout') }}" class="dropdown-item">Log Out</a>
-                        </div>
-                    </div>
-                </div>
-            </nav>
-            <!-- Navbar End -->
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    <div class="container-fluid pt-4 px-4">
-                        {% for category, message in messages %}
-                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
-                                {{ message }}
-                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                            </div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
-            {% endwith %}
-
+        <main class="flex-1">
             {% block content %}{% endblock %}
-        </div>
-        <!-- Content End -->
-
-        <!-- Back to Top -->
-        <a href="#" class="btn btn-lg btn-primary btn-lg-square back-to-top"><i class="bi bi-arrow-up"></i></a>
+        </main>
     </div>
 
-    <!-- JavaScript Libraries -->
-    <script src="{{ url_for('static', filename='lib/chart/chart.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='lib/easing/easing.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='lib/waypoints/waypoints.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='lib/owlcarousel/owl.carousel.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='lib/tempusdominus/js/moment.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='lib/tempusdominus/js/moment-timezone.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='lib/tempusdominus/js/tempusdominus-bootstrap-4.min.js') }}"></script>
+    <!-- Back to top -->
+    <button type="button" id="backToTop"
+            class="fixed bottom-6 right-6 z-20 grid h-11 w-11 place-items-center rounded-full bg-accent-600 text-white
+                   shadow-lg shadow-accent-600/25 transition-opacity duration-300 hover:bg-accent-700 opacity-0 pointer-events-none"
+            aria-label="Back to top">
+        <i data-lucide="arrow-up" class="h-5 w-5"></i>
+    </button>
 
-    <!-- Template Javascript -->
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     <script src="{{ url_for('static', filename='js/password_toggle.js') }}"></script>
-
     {% block scripts %}{% endblock %}
 </body>
 

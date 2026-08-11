@@ -3,49 +3,114 @@
 {% block title %}Dashboard - Office System{% endblock %}
 
 {% block content %}
-<div class="container-fluid pt-4 px-4">
-    <div class="row g-4">
-        <div class="col-sm-6 col-xl-3">
-            <div class="bg-light rounded d-flex align-items-center justify-content-between p-4">
-                <i class="fa fa-list-alt fa-3x text-primary"></i>
-                <div class="ms-3">
-                    <p class="mb-2">Purchase Requests</p>
-                    <h6 class="mb-0">0</h6>
-                </div>
-            </div>
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+            <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">
+                Welcome back{% if session.get('user_name') %}, {{ session.get('user_name').split('@')[0].split(' ')[0]|title }}{% endif %}
+            </h1>
+            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Here's an overview of your workspace.
+            </p>
         </div>
-        <div class="col-sm-6 col-xl-3">
-            <div class="bg-light rounded d-flex align-items-center justify-content-between p-4">
-                <i class="fa fa-cart-arrow-down fa-3x text-primary"></i>
-                <div class="ms-3">
-                    <p class="mb-2">Purchase Orders</p>
-                    <h6 class="mb-0">0</h6>
-                </div>
-            </div>
-        </div>
-        <div class="col-sm-6 col-xl-3">
-            <div class="bg-light rounded d-flex align-items-center justify-content-between p-4">
-                <i class="fa fa-file-invoice fa-3x text-primary"></i>
-                <div class="ms-3">
-                    <p class="mb-2">Invoices</p>
-                    <h6 class="mb-0">0</h6>
-                </div>
-            </div>
-        </div>
-        <div class="col-sm-6 col-xl-3">
-            <div class="bg-light rounded d-flex align-items-center justify-content-between p-4">
-                <i class="fa fa-warehouse fa-3x text-primary"></i>
-                <div class="ms-3">
-                    <p class="mb-2">Stocks</p>
-                    <h6 class="mb-0">0</h6>
-                </div>
-            </div>
-        </div>
+        <span class="badge badge-warning">
+            <i data-lucide="info" class="h-3 w-3"></i>
+            Sample figures &mdash; not yet connected to data
+        </span>
     </div>
 
-    <div class="bg-light text-center rounded p-4 mt-4">
-        <h4 class="mb-0">Welcome to the Office System</h4>
-        <p class="mb-0">This dashboard is a design placeholder — connect it to your data next.</p>
+    <!-- Stat cards -->
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {% set stats = [
+            ('Purchase Requests', '0', 'clipboard-list', 'brand',  'Awaiting approval'),
+            ('Purchase Orders',   '0', 'shopping-cart',  'accent', 'Open this month'),
+            ('Invoices',          '0', 'file-text',      'brand',  'Issued this month'),
+            ('Stock Items',       '0', 'boxes',          'accent', 'Tracked in warehouse')
+        ] %}
+        {% for label, value, icon, tone, caption in stats %}
+        <div class="card p-5 transition hover:shadow-md">
+            <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <p class="truncate text-sm font-medium text-slate-500 dark:text-slate-400">{{ label }}</p>
+                    <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">{{ value }}</p>
+                </div>
+                <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl
+                             {% if tone == 'brand' %}bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400
+                             {% else %}bg-accent-50 text-accent-600 dark:bg-accent-500/10 dark:text-accent-400{% endif %}">
+                    <i data-lucide="{{ icon }}" class="h-5 w-5"></i>
+                </span>
+            </div>
+            <p class="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-400 dark:border-slate-800 dark:text-slate-500">
+                {{ caption }}
+            </p>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+
+        <!-- Quick actions -->
+        <div class="card lg:col-span-2">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <i data-lucide="zap" class="h-[18px] w-[18px] text-accent-600 dark:text-accent-400"></i>
+                    Quick Actions
+                </h2>
+            </div>
+            <div class="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
+                {% set actions = [
+                    ('Purchase Request',      'clipboard-list', 'purchase_request'),
+                    ('Customers & Suppliers', 'contact',        'parameters_business_partners'),
+                    ('Warehouse Stocks',      'boxes',          'warehouse_stocks'),
+                    ('User Accounts',         'users',          'parameters_users')
+                ] %}
+                {% for label, icon, slug in actions %}
+                <a href="{{ url_for('main.page', slug=slug) }}"
+                   class="group flex items-center gap-3 rounded-xl border border-slate-200 p-3.5 transition
+                          hover:border-brand-300 hover:bg-brand-50/50 dark:border-slate-800 dark:hover:border-brand-500/40
+                          dark:hover:bg-brand-500/5">
+                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600
+                                 transition group-hover:bg-brand-600 group-hover:text-white
+                                 dark:bg-slate-800 dark:text-slate-300">
+                        <i data-lucide="{{ icon }}" class="h-[18px] w-[18px]"></i>
+                    </span>
+                    <span class="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{{ label }}</span>
+                    <i data-lucide="chevron-right"
+                       class="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-brand-600 dark:text-slate-600"></i>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Build status -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <i data-lucide="activity" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                    Build Status
+                </h2>
+            </div>
+            <div class="space-y-3 p-5">
+                {% set modules = [
+                    ('User Accounts',         'Live',         'success'),
+                    ('Authentication',        'Live',         'success'),
+                    ('Customers & Suppliers', 'Prototype',    'warning'),
+                    ('Other modules',         'Design only',  'slate')
+                ] %}
+                {% for name, state, tone in modules %}
+                <div class="flex items-center justify-between gap-3">
+                    <span class="min-w-0 truncate text-sm text-slate-600 dark:text-slate-300">{{ name }}</span>
+                    <span class="badge badge-{{ tone }} shrink-0">{{ state }}</span>
+                </div>
+                {% endfor %}
+
+                <p class="border-t border-slate-100 pt-3 text-xs leading-relaxed text-slate-400 dark:border-slate-800 dark:text-slate-500">
+                    Modules marked <em>Design only</em> show sample rows; edits there are not saved.
+                </p>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}

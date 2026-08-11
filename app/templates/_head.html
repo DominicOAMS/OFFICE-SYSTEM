@@ -1,0 +1,128 @@
+{# Shared <head> assets: fonts, Tailwind + theme config, Lucide icons.
+   Included by base.html and by the standalone auth pages. #}
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+{# Applied before first paint so a dark-mode reload never flashes white. #}
+<script>
+    (function () {
+        try {
+            var stored = localStorage.getItem('os-theme');
+            var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (stored === 'dark' || (!stored && prefersDark)) {
+                document.documentElement.classList.add('dark');
+            }
+        } catch (e) { /* private mode - fall back to light */ }
+    })();
+</script>
+
+{# Tailwind Play CDN: compiles in the browser, so there is no build step to run.
+   Fine for internal use; swap for a compiled stylesheet if this is ever public-facing. #}
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<script>
+    tailwind.config = {
+        darkMode: 'class',
+        theme: {
+            extend: {
+                fontFamily: {
+                    sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+                },
+                colors: {
+                    // Company teal (#1A968B) - navigation, structure
+                    brand: {
+                        50: '#eefbf9', 100: '#d5f5f1', 200: '#aeeae4', 300: '#7ad9d1',
+                        400: '#45bfb7', 500: '#26a79e', 600: '#1A968B', 700: '#167a72',
+                        800: '#12605b', 900: '#124f4b', 950: '#04302e',
+                    },
+                    // Company maroon (#B12F55) - primary actions, emphasis
+                    accent: {
+                        50: '#fdf2f5', 100: '#fbe8ed', 200: '#f7d1dc', 300: '#f0abbf',
+                        400: '#e67d9c', 500: '#d85578', 600: '#B12F55', 700: '#9a2749',
+                        800: '#81233f', 900: '#6f2139', 950: '#3e0e1d',
+                    },
+                },
+            },
+        },
+    };
+</script>
+
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+<style type="text/tailwindcss">
+    @layer components {
+        /* Buttons */
+        .btn {
+            @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium
+                   transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
+                   disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-slate-900;
+        }
+        .btn-primary  { @apply bg-accent-600 text-white shadow-sm hover:bg-accent-700 focus-visible:ring-accent-500; }
+        .btn-secondary{ @apply border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus-visible:ring-slate-400
+                               dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700; }
+        .btn-danger   { @apply bg-rose-600 text-white shadow-sm hover:bg-rose-700 focus-visible:ring-rose-500; }
+        .btn-warning  { @apply bg-amber-500 text-white shadow-sm hover:bg-amber-600 focus-visible:ring-amber-400; }
+        .btn-ghost    { @apply text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800; }
+        .btn-sm       { @apply px-2.5 py-1.5 text-xs; }
+        .btn-icon     { @apply grid h-8 w-8 place-items-center rounded-lg p-0; }
+
+        /* Surfaces */
+        .card        { @apply rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900; }
+        .card-header { @apply flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800; }
+        .card-title  { @apply flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-white; }
+
+        /* Forms */
+        .label { @apply mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300; }
+        .input {
+            @apply block w-full rounded-lg border-slate-300 bg-white text-sm text-slate-900 shadow-sm
+                   placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25
+                   disabled:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100
+                   dark:placeholder:text-slate-500 dark:disabled:bg-slate-800/50;
+        }
+        .checkbox {
+            @apply h-4 w-4 rounded border-slate-300 text-accent-600 focus:ring-2 focus:ring-accent-500/40
+                   dark:border-slate-600 dark:bg-slate-700;
+        }
+        .help { @apply mt-1.5 text-xs text-slate-500 dark:text-slate-400; }
+
+        /* Tables */
+        .table-th { @apply whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400; }
+        .table-td { @apply px-4 py-3 text-sm text-slate-700 dark:text-slate-300; }
+        .table-row{ @apply border-t border-slate-100 transition hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/40; }
+
+        /* Badges */
+        .badge         { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium; }
+        .badge-brand   { @apply bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-600/20 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-400/20; }
+        .badge-accent  { @apply bg-accent-50 text-accent-700 ring-1 ring-inset ring-accent-600/20 dark:bg-accent-500/10 dark:text-accent-300 dark:ring-accent-400/20; }
+        .badge-slate   { @apply bg-slate-100 text-slate-600 ring-1 ring-inset ring-slate-500/20 dark:bg-slate-700/50 dark:text-slate-300 dark:ring-slate-400/20; }
+        .badge-success { @apply bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/20; }
+        .badge-warning { @apply bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/20; }
+
+        /* Modal shell */
+        /* Visibility is driven by a literal `hidden` class in the markup so JS can
+           reliably detect which modals are open; this only sets the open layout. */
+        .modal-backdrop { @apply fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-sm sm:p-6; }
+        .modal-panel    { @apply relative my-4 w-full rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900; }
+        .modal-header   { @apply flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800; }
+        .modal-title    { @apply text-base font-semibold text-slate-900 dark:text-white; }
+        .modal-body     { @apply max-h-[calc(100vh-16rem)] overflow-y-auto px-5 py-4 os-scroll; }
+        .modal-footer   { @apply flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800; }
+    }
+
+    /* The off-canvas drawer is driven by Tailwind utilities toggled in main.js
+       (-translate-x-full / lg:translate-x-0), not by custom CSS here. */
+
+    /* Slim scrollbars inside the sidebar and modal bodies. */
+    .os-scroll { scrollbar-width: thin; scrollbar-color: rgb(148 163 184 / .35) transparent; }
+    .os-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .os-scroll::-webkit-scrollbar-track { background: transparent; }
+    .os-scroll::-webkit-scrollbar-thumb {
+        background-color: rgb(148 163 184 / .35);
+        border-radius: 9999px;
+    }
+    .os-scroll::-webkit-scrollbar-thumb:hover { background-color: rgb(148 163 184 / .55); }
+
+    /* Lucide swaps <i data-lucide> for an <svg>; keep sizing stable during that swap. */
+    [data-lucide] { flex-shrink: 0; }
+</style>

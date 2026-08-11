@@ -1,198 +1,281 @@
-(function ($) {
+/* Office System - core UI behaviour (vanilla JS, no jQuery) */
+(function () {
     "use strict";
 
-    // Back to top button
-    $(window).scroll(function () {
-        if ($(this).scrollTop() > 300) {
-            $('.back-to-top').fadeIn('slow');
+    var THEME_KEY = "os-theme";
+
+    /* ---------------------------------------------------------------- Theme */
+
+    function applyTheme(theme) {
+        var root = document.documentElement;
+        if (theme === "dark") {
+            root.classList.add("dark");
         } else {
-            $('.back-to-top').fadeOut('slow');
+            root.classList.remove("dark");
         }
-    });
-    $('.back-to-top').click(function () {
-        $('html, body').animate({scrollTop: 0}, 1500, 'easeInOutExpo');
-        return false;
-    });
-
-
-    // Sidebar Toggler
-    $('.sidebar-toggler').click(function () {
-        $('.sidebar, .content').toggleClass("open");
-        return false;
-    });
-
-
-    // Progress Bar
-    $('.pg-bar').waypoint(function () {
-        $('.progress .progress-bar').each(function () {
-            $(this).css("width", $(this).attr("aria-valuenow") + '%');
+        document.querySelectorAll("[data-theme-icon]").forEach(function (el) {
+            el.setAttribute("data-lucide", theme === "dark" ? "sun" : "moon");
         });
-    }, {offset: '80%'});
+        refreshIcons();
+    }
 
+    function currentTheme() {
+        return document.documentElement.classList.contains("dark") ? "dark" : "light";
+    }
 
-    // Calender
-    $('#calender').datetimepicker({
-        inline: true,
-        format: 'L'
-    });
-
-
-    // Testimonials carousel
-    $(".testimonial-carousel").owlCarousel({
-        autoplay: true,
-        smartSpeed: 1000,
-        items: 1,
-        dots: true,
-        loop: true,
-        nav : false
-    });
-
-
-    /*
-
-    // Worldwide Sales Chart
-    var ctx1 = $("#worldwide-sales").get(0).getContext("2d");
-    var myChart1 = new Chart(ctx1, {
-        type: "bar",
-        data: {
-            labels: ["2016", "2017", "2018", "2019", "2020", "2021", "2022"],
-            datasets: [{
-                    label: "USA",
-                    data: [15, 30, 55, 65, 60, 80, 95],
-                    backgroundColor: "rgba(0, 156, 255, .7)"
-                },
-                {
-                    label: "UK",
-                    data: [8, 35, 40, 60, 70, 55, 75],
-                    backgroundColor: "rgba(0, 156, 255, .5)"
-                },
-                {
-                    label: "AU",
-                    data: [12, 25, 45, 55, 65, 70, 60],
-                    backgroundColor: "rgba(0, 156, 255, .3)"
-                }
-            ]
-            },
-        options: {
-            responsive: true
+    function toggleTheme() {
+        var next = currentTheme() === "dark" ? "light" : "dark";
+        try {
+            localStorage.setItem(THEME_KEY, next);
+        } catch (e) {
+            /* storage unavailable - theme just won't persist */
         }
-    });
+        applyTheme(next);
+    }
 
+    /* --------------------------------------------------------------- Icons */
 
-    // Salse & Revenue Chart
-    var ctx2 = $("#salse-revenue").get(0).getContext("2d");
-    var myChart2 = new Chart(ctx2, {
-        type: "line",
-        data: {
-            labels: ["2016", "2017", "2018", "2019", "2020", "2021", "2022"],
-            datasets: [{
-                    label: "Salse",
-                    data: [15, 30, 55, 45, 70, 65, 85],
-                    backgroundColor: "rgba(0, 156, 255, .5)",
-                    fill: true
-                },
-                {
-                    label: "Revenue",
-                    data: [99, 135, 170, 130, 190, 180, 270],
-                    backgroundColor: "rgba(0, 156, 255, .3)",
-                    fill: true
-                }
-            ]
-            },
-        options: {
-            responsive: true
+    function refreshIcons() {
+        if (window.lucide && typeof window.lucide.createIcons === "function") {
+            window.lucide.createIcons();
         }
-    });
-    
+    }
 
+    /* ------------------------------------------------------------- Sidebar */
 
-    // Single Line Chart
-    var ctx3 = $("#line-chart").get(0).getContext("2d");
-    var myChart3 = new Chart(ctx3, {
-        type: "line",
-        data: {
-            labels: [50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150],
-            datasets: [{
-                label: "Salse",
-                fill: false,
-                backgroundColor: "rgba(0, 156, 255, .3)",
-                data: [7, 8, 8, 9, 9, 9, 10, 11, 14, 14, 15]
-            }]
-        },
-        options: {
-            responsive: true
+    // Fixed rail from lg up (lg:flex keeps it visible there regardless of `hidden`);
+    // below lg it is a drawer that this toggles on and off.
+    function setSidebarOpen(open) {
+        var sidebar = document.getElementById("sidebar");
+        var overlay = document.getElementById("sidebarOverlay");
+        if (sidebar) {
+            sidebar.classList.toggle("hidden", !open);
+            sidebar.classList.toggle("flex", open);
         }
-    });
+        if (overlay) overlay.classList.toggle("hidden", !open);
+        document.body.classList.toggle("sidebar-open", open);
+    }
 
+    function initSidebar() {
+        document.querySelectorAll("[data-sidebar-toggle]").forEach(function (btn) {
+            btn.addEventListener("click", function (e) {
+                e.preventDefault();
+                setSidebarOpen(!document.body.classList.contains("sidebar-open"));
+            });
+        });
 
-    // Single Bar Chart
-    var ctx4 = $("#bar-chart").get(0).getContext("2d");
-    var myChart4 = new Chart(ctx4, {
-        type: "bar",
-        data: {
-            labels: ["Italy", "France", "Spain", "USA", "Argentina"],
-            datasets: [{
-                backgroundColor: [
-                    "rgba(0, 156, 255, .7)",
-                    "rgba(0, 156, 255, .6)",
-                    "rgba(0, 156, 255, .5)",
-                    "rgba(0, 156, 255, .4)",
-                    "rgba(0, 156, 255, .3)"
-                ],
-                data: [55, 49, 44, 24, 15]
-            }]
-        },
-        options: {
-            responsive: true
+        var overlay = document.getElementById("sidebarOverlay");
+        if (overlay) {
+            overlay.addEventListener("click", function () {
+                setSidebarOpen(false);
+            });
         }
-    });
 
+        // Close the drawer after navigating on mobile.
+        document.querySelectorAll("#sidebar a[href]:not([href='#'])").forEach(function (link) {
+            link.addEventListener("click", function () {
+                setSidebarOpen(false);
+            });
+        });
 
-    // Pie Chart
-    var ctx5 = $("#pie-chart").get(0).getContext("2d");
-    var myChart5 = new Chart(ctx5, {
-        type: "pie",
-        data: {
-            labels: ["Italy", "France", "Spain", "USA", "Argentina"],
-            datasets: [{
-                backgroundColor: [
-                    "rgba(0, 156, 255, .7)",
-                    "rgba(0, 156, 255, .6)",
-                    "rgba(0, 156, 255, .5)",
-                    "rgba(0, 156, 255, .4)",
-                    "rgba(0, 156, 255, .3)"
-                ],
-                data: [55, 49, 44, 24, 15]
-            }]
-        },
-        options: {
-            responsive: true
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "Escape") setSidebarOpen(false);
+        });
+    }
+
+    /* ------------------------------------------------- Collapsible nav groups */
+
+    function initNavGroups() {
+        document.querySelectorAll("[data-nav-group-toggle]").forEach(function (btn) {
+            btn.addEventListener("click", function (e) {
+                e.preventDefault();
+                var group = btn.closest("[data-nav-group]");
+                if (!group) return;
+                var panel = group.querySelector("[data-nav-group-panel]");
+                var chevron = group.querySelector("[data-nav-chevron]");
+                var isOpen = group.getAttribute("data-open") === "true";
+                group.setAttribute("data-open", isOpen ? "false" : "true");
+                btn.setAttribute("aria-expanded", isOpen ? "false" : "true");
+                if (panel) panel.classList.toggle("hidden", isOpen);
+                if (chevron) chevron.classList.toggle("rotate-180", !isOpen);
+            });
+        });
+    }
+
+    /* ----------------------------------------------------------- Dropdowns */
+
+    function closeAllDropdowns(except) {
+        document.querySelectorAll("[data-dropdown]").forEach(function (dd) {
+            if (dd === except) return;
+            var panel = dd.querySelector("[data-dropdown-panel]");
+            if (panel) panel.classList.add("hidden");
+            dd.setAttribute("data-open", "false");
+            var trigger = dd.querySelector("[data-dropdown-toggle]");
+            if (trigger) trigger.setAttribute("aria-expanded", "false");
+        });
+    }
+
+    function initDropdowns() {
+        document.querySelectorAll("[data-dropdown]").forEach(function (dd) {
+            var trigger = dd.querySelector("[data-dropdown-toggle]");
+            var panel = dd.querySelector("[data-dropdown-panel]");
+            if (!trigger || !panel) return;
+
+            trigger.addEventListener("click", function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var willOpen = panel.classList.contains("hidden");
+                closeAllDropdowns(dd);
+                panel.classList.toggle("hidden", !willOpen);
+                dd.setAttribute("data-open", willOpen ? "true" : "false");
+                trigger.setAttribute("aria-expanded", willOpen ? "true" : "false");
+            });
+
+            // Dropdowns marked keep-open don't close when their contents are clicked
+            // (used by the multi-select branch picker).
+            if (dd.hasAttribute("data-dropdown-keep-open")) {
+                panel.addEventListener("click", function (e) {
+                    e.stopPropagation();
+                });
+            }
+        });
+
+        document.addEventListener("click", function () {
+            closeAllDropdowns(null);
+        });
+    }
+
+    /* -------------------------------------------------------------- Modals */
+
+    var lastFocused = null;
+
+    function openModal(id) {
+        var modal = document.getElementById(id);
+        if (!modal) return;
+        lastFocused = document.activeElement;
+        modal.classList.remove("hidden");
+        document.body.classList.add("overflow-hidden");
+        refreshIcons();
+
+        // Prefer the first real form field; fall back to any focusable control
+        // so focus never lands on the close button when there's a field to fill.
+        var target =
+            modal.querySelector(
+                "input:not([type=hidden]):not([disabled]):not([type=search]), select:not([disabled]), textarea:not([disabled])"
+            ) || modal.querySelector("button:not([disabled])");
+        if (target) {
+            window.setTimeout(function () {
+                target.focus();
+            }, 30);
         }
-    });
+    }
 
-
-    // Doughnut Chart
-    var ctx6 = $("#doughnut-chart").get(0).getContext("2d");
-    var myChart6 = new Chart(ctx6, {
-        type: "doughnut",
-        data: {
-            labels: ["Italy", "France", "Spain", "USA", "Argentina"],
-            datasets: [{
-                backgroundColor: [
-                    "rgba(0, 156, 255, .7)",
-                    "rgba(0, 156, 255, .6)",
-                    "rgba(0, 156, 255, .5)",
-                    "rgba(0, 156, 255, .4)",
-                    "rgba(0, 156, 255, .3)"
-                ],
-                data: [55, 49, 44, 24, 15]
-            }]
-        },
-        options: {
-            responsive: true
+    function closeModal(id) {
+        var modal = typeof id === "string" ? document.getElementById(id) : id;
+        if (!modal) return;
+        modal.classList.add("hidden");
+        // Only release the scroll lock once every modal is closed.
+        if (!document.querySelector("[data-modal]:not(.hidden)")) {
+            document.body.classList.remove("overflow-hidden");
         }
-    });
-    */
-    
-})(jQuery);
+        if (lastFocused && typeof lastFocused.focus === "function") {
+            lastFocused.focus();
+        }
+    }
 
+    function initModals() {
+        // Any element with data-modal-open="<id>" opens that modal.
+        document.addEventListener("click", function (e) {
+            var opener = e.target.closest("[data-modal-open]");
+            if (opener) {
+                e.preventDefault();
+                openModal(opener.getAttribute("data-modal-open"));
+                return;
+            }
+            var closer = e.target.closest("[data-modal-close]");
+            if (closer) {
+                e.preventDefault();
+                var modal = closer.closest("[data-modal]");
+                if (modal) closeModal(modal);
+            }
+        });
+
+        // Click on the backdrop (but not the dialog) closes.
+        document.querySelectorAll("[data-modal]").forEach(function (modal) {
+            modal.addEventListener("mousedown", function (e) {
+                if (e.target === modal) closeModal(modal);
+            });
+        });
+
+        document.addEventListener("keydown", function (e) {
+            if (e.key !== "Escape") return;
+            var open = document.querySelector("[data-modal]:not(.hidden)");
+            if (open) closeModal(open);
+        });
+    }
+
+    /* --------------------------------------------------------- Flash alerts */
+
+    function initAlerts() {
+        document.addEventListener("click", function (e) {
+            var btn = e.target.closest("[data-alert-dismiss]");
+            if (!btn) return;
+            var alert = btn.closest("[data-alert]");
+            if (alert) alert.remove();
+        });
+    }
+
+    /* ---------------------------------------------------------- Back to top */
+
+    function initBackToTop() {
+        var btn = document.getElementById("backToTop");
+        if (!btn) return;
+        var main = document.getElementById("mainScroll") || window;
+
+        function onScroll() {
+            var y = main === window ? window.scrollY : main.scrollTop;
+            btn.classList.toggle("opacity-0", y < 300);
+            btn.classList.toggle("pointer-events-none", y < 300);
+        }
+
+        main.addEventListener("scroll", onScroll);
+        onScroll();
+
+        btn.addEventListener("click", function (e) {
+            e.preventDefault();
+            if (main === window) {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+            } else {
+                main.scrollTo({ top: 0, behavior: "smooth" });
+            }
+        });
+    }
+
+    /* ----------------------------------------------------------------- Boot */
+
+    document.addEventListener("DOMContentLoaded", function () {
+        refreshIcons();
+        applyTheme(currentTheme());
+        initSidebar();
+        initNavGroups();
+        initDropdowns();
+        initModals();
+        initAlerts();
+        initBackToTop();
+
+        document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
+            btn.addEventListener("click", function (e) {
+                e.preventDefault();
+                toggleTheme();
+            });
+        });
+    });
+
+    // Exposed for page-level scripts.
+    window.OS = {
+        openModal: openModal,
+        closeModal: closeModal,
+        refreshIcons: refreshIcons,
+        toggleTheme: toggleTheme,
+    };
+})();
