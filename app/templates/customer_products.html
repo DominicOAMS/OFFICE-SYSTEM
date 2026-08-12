@@ -259,6 +259,7 @@
 
         var inventoryItems = {{ inventory_items | tojson }};
         var allUnits = {{ units | tojson }};
+        var priceCodes = {{ price_codes | tojson }};
 
         function findInventoryItem(catalogCode) {
             for (var i = 0; i < inventoryItems.length; i++) {
@@ -302,24 +303,23 @@
 
         /* ------------------------------------------------------- price code */
 
-        var priceCodeStorageKey = 'customerPriceCode_' + customerId;
-
         function updateAddButtonState() {
             addNewBtn.disabled = !priceCodeFilter.value.trim();
         }
 
         priceCodeFilter.addEventListener('input', function () {
-            try {
-                sessionStorage.setItem(priceCodeStorageKey, priceCodeFilter.value.trim());
-            } catch (e) { /* storage unavailable - filter just won't persist */ }
             updateAddButtonState();
             applyFilters();
         });
 
-        try {
-            var storedPriceCode = sessionStorage.getItem(priceCodeStorageKey);
-            if (storedPriceCode) priceCodeFilter.value = storedPriceCode;
-        } catch (e) { /* storage unavailable */ }
+        var justUsedPriceCode = new URLSearchParams(window.location.search).get('priceCode');
+        if (justUsedPriceCode) {
+            priceCodeFilter.value = justUsedPriceCode;
+        } else if (priceCodes.length === 1) {
+            priceCodeFilter.value = priceCodes[0];
+        } else if (priceCodes.length === 0) {
+            priceCodeFilter.value = 'REGULAR';
+        }
         updateAddButtonState();
 
         /* --------------------------------------------------- catalog search */
@@ -369,49 +369,41 @@
 
         var newPriceNote = document.getElementById('newPriceNote');
 
-        function openAdd() {
+        function openAddModal(row) {
             recordForm.reset();
             recordForm.action = addUrl;
-            var priceCode = priceCodeFilter.value.trim();
-            fieldPriceCode.value = priceCode;
             fieldEffectiveDate.value = todayIso();
-            fieldCatalog.value = '';
-            catalogSearch.readOnly = false;
-            newPriceNote.classList.add('hidden');
-            modalTitle.textContent = 'Add Product';
-            refreshCatalogOptions(priceCode, null);
-            refreshUnitOptions(null, null);
-            OS.openModal('recordModal');
-        }
+            document.getElementById('fieldPrice').value = '';
 
-        function openAddPriceForRow(row) {
-            var id = row.getAttribute('data-id');
-            var catalog = row.getAttribute('data-catalog');
-            recordForm.reset();
-            recordForm.action = addUrl;
+            var id = row ? row.getAttribute('data-id') : null;
+            var catalog = row ? row.getAttribute('data-catalog') : '';
+            var priceCode = row ? row.getAttribute('data-price-code') : priceCodeFilter.value.trim();
+
             fieldCatalog.value = catalog;
             catalogSearch.value = catalog;
-            catalogSearch.readOnly = true;
-            document.getElementById('fieldDescription').value = row.getAttribute('data-description');
-            document.getElementById('fieldCategory').value = row.getAttribute('data-category');
-            document.getElementById('fieldPrice').value = '';
-            fieldEffectiveDate.value = todayIso();
-            var priceCode = row.getAttribute('data-price-code');
+            catalogSearch.readOnly = !!row;
             fieldPriceCode.value = priceCode;
-            newPriceNote.classList.remove('hidden');
-            modalTitle.textContent = 'Add New Price — ' + catalog;
+            newPriceNote.classList.toggle('hidden', !row);
+            modalTitle.textContent = row ? 'Add New Price — ' + catalog : 'Add Product';
+
+            if (row) {
+                document.getElementById('fieldDescription').value = row.getAttribute('data-description');
+                document.getElementById('fieldCategory').value = row.getAttribute('data-category');
+            }
+
             refreshCatalogOptions(priceCode, id);
-            refreshUnitOptions(findInventoryItem(catalog), row.getAttribute('data-unit'));
+            refreshUnitOptions(row ? findInventoryItem(catalog) : null, row ? row.getAttribute('data-unit') : null);
             OS.openModal('recordModal');
+            window.setTimeout(function () { fieldEffectiveDate.focus(); }, 50);
         }
 
-        addNewBtn.addEventListener('click', openAdd);
+        addNewBtn.addEventListener('click', function () { openAddModal(null); });
 
         tbody.addEventListener('click', function (e) {
             var addPriceBtn = e.target.closest('.js-add-price');
             var delBtn = e.target.closest('.js-delete');
 
-            if (addPriceBtn) openAddPriceForRow(addPriceBtn.closest('tr'));
+            if (addPriceBtn) openAddModal(addPriceBtn.closest('tr'));
 
             if (delBtn) {
                 var row = delBtn.closest('tr');

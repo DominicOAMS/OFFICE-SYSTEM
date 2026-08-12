@@ -105,7 +105,6 @@ def _parse_customer_form():
         "paymentTermDays": int(payment_term_days) if payment_term_days.isdigit() else 0,
         "salesRep": request.form.get("salesRep", "").strip() or None,
         "customerType": request.form.get("customerType", "").strip() or None,
-        "vpSupplierId": request.form.get("vpSupplierId", "").strip() or None,
     }
 
 
@@ -115,8 +114,13 @@ def customers():
     records = customers_repo.list_active_customers()
     customer_types = customers_repo.list_distinct_customer_types()
     sales_reps = customers_repo.list_distinct_sales_reps()
+    next_id_number = customers_repo.next_customer_id_number()
     return render_template(
-        "customers.html", customers=records, customer_types=customer_types, sales_reps=sales_reps
+        "customers.html",
+        customers=records,
+        customer_types=customer_types,
+        sales_reps=sales_reps,
+        next_id_number=next_id_number,
     )
 
 
@@ -202,16 +206,20 @@ def customer_products(customer_id):
 @login_required
 def customer_products_add(customer_id):
     data = _parse_product_form()
+    redirect_args = {"customer_id": customer_id}
+    if data["priceCode"]:
+        redirect_args["priceCode"] = data["priceCode"]
+
     if not data["catalog"] or not data["price"] or not data["customerDescription"]:
         flash("Catalog, description, and price are required.", "error")
-        return redirect(url_for("main.customer_products", customer_id=customer_id))
+        return redirect(url_for("main.customer_products", **redirect_args))
     if customers_repo.product_price_exists(customer_id, data):
-        flash("That exact price (same catalog, price code, unit, price, and effective date) is already on file.", "error")
-        return redirect(url_for("main.customer_products", customer_id=customer_id))
+        flash("This exact price is already on file.", "error")
+        return redirect(url_for("main.customer_products", **redirect_args))
 
     customers_repo.create_product(customer_id, data, created_by=session.get("user_id"))
     flash("Product price added.", "success")
-    return redirect(url_for("main.customer_products", customer_id=customer_id))
+    return redirect(url_for("main.customer_products", **redirect_args))
 
 
 @main_bp.route("/page/parameters_customers/<int:customer_id>/products/<int:product_id>/delete", methods=["POST"])
