@@ -35,11 +35,49 @@
                 </div>
             </div>
         </div>
-        <button type="button" class="btn btn-primary" id="addNewBtn">
-            <i data-lucide="plus" class="h-4 w-4"></i>
-            Add Price
-        </button>
+        <!-- Price code is chosen first: it scopes the list below and is the code
+             the new product is added under. -->
+        <div class="flex items-end gap-3">
+            <form method="GET" id="priceCodeForm"
+                  action="{{ url_for('main.supplier_products', supplier_id=supplier.id) }}">
+                <input type="hidden" name="q" value="{{ search }}">
+                <label class="label" for="priceCodeFilter">Price Code <span class="text-accent-600">*</span></label>
+                {# Custom dropdown rather than a native <datalist>: a datalist only
+                   suggests entries matching what's already typed, so after picking a
+                   code you couldn't see the supplier's others without clearing the
+                   field first. Same reasoning as the customers picker. #}
+                <div class="relative" data-dropdown>
+                    <input type="text" name="priceCode" id="priceCodeFilter" value="{{ price_code }}"
+                           autocomplete="off" data-dropdown-toggle
+                           class="input w-56 pr-8" placeholder="Type or pick a price code…">
+                    {% if has_price_code %}
+                        <a href="{{ url_for('main.supplier_products', supplier_id=supplier.id, q=search or None) }}"
+                           class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400
+                                  hover:text-slate-600 dark:hover:text-slate-200"
+                           title="Clear price code" aria-label="Clear price code">
+                            <i data-lucide="x" class="h-3.5 w-3.5"></i>
+                        </a>
+                    {% endif %}
+                    <div id="priceCodeDropdown" data-dropdown-panel
+                         class="hidden absolute z-20 mt-1 max-h-56 w-56 overflow-y-auto rounded-xl border
+                                border-slate-200 bg-white py-1 shadow-lg shadow-slate-900/5 os-scroll
+                                dark:border-slate-700 dark:bg-slate-800"></div>
+                </div>
+            </form>
+
+            <button type="button" class="btn btn-primary" id="addNewBtn"
+                    {{ 'disabled' if not has_price_code }}
+                    title="{{ 'Add a product under this price code' if has_price_code else 'Choose a price code first' }}">
+                <i data-lucide="package-plus" class="h-4 w-4"></i>
+                Add Product
+            </button>
+        </div>
     </div>
+
+    <p class="-mt-3 mb-4 text-xs text-slate-500 dark:text-slate-400">
+        Pick or type a price code to see this supplier's products under it &mdash; the same code is used
+        for any product you add.
+    </p>
 
     <!-- Explainer -->
     <div class="mb-5 flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3
@@ -61,13 +99,14 @@
             <div class="flex items-center gap-2">
                 <form method="GET" action="{{ url_for('main.supplier_products', supplier_id=supplier.id) }}"
                       class="relative" id="searchForm">
+                    {% if has_price_code %}<input type="hidden" name="priceCode" value="{{ price_code }}">{% endif %}
                     <i data-lucide="search"
                        class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
                     <input type="search" name="q" id="productSearch" value="{{ search }}"
                            placeholder="Search catalog, description…"
                            class="input w-64 py-1.5 pl-9 pr-8 text-sm">
                     {% if search %}
-                        <a href="{{ url_for('main.supplier_products', supplier_id=supplier.id) }}"
+                        <a href="{{ url_for('main.supplier_products', supplier_id=supplier.id, priceCode=price_code if has_price_code else none) }}"
                            class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-slate-600
                                   dark:hover:text-slate-200" title="Clear search" aria-label="Clear search">
                             <i data-lucide="x" class="h-3.5 w-3.5"></i>
@@ -78,13 +117,21 @@
             </div>
         </div>
 
-        {% if search %}
-        <div class="border-b border-slate-200 bg-slate-50 px-5 py-2.5 text-sm text-slate-600
-                    dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-300">
-            <i data-lucide="filter" class="mr-1 inline h-3.5 w-3.5"></i>
-            Showing results for <span class="font-medium">"{{ search }}"</span>
-            &mdash; <a href="{{ url_for('main.supplier_products', supplier_id=supplier.id) }}"
-                       class="text-brand-600 hover:underline dark:text-brand-400">clear</a>
+        {% if search or has_price_code %}
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-200 bg-slate-50 px-5 py-2.5
+                    text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-300">
+            <i data-lucide="filter" class="h-3.5 w-3.5"></i>
+            <span>Showing</span>
+            {% if has_price_code %}
+                <span class="badge badge-brand">
+                    {{ price_code if price_code else 'No price code' }}
+                </span>
+            {% endif %}
+            {% if search %}
+                <span>matching <span class="font-medium">"{{ search }}"</span></span>
+            {% endif %}
+            <a href="{{ url_for('main.supplier_products', supplier_id=supplier.id) }}"
+               class="text-brand-600 hover:underline dark:text-brand-400">clear all</a>
         </div>
         {% endif %}
 
@@ -167,7 +214,7 @@
                                 </button>
                                 <button type="button"
                                         class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-delete"
-                                        title="Delete" aria-label="Delete price">
+                                        title="Delete" aria-label="Delete product">
                                     <i data-lucide="trash-2" class="h-4 w-4"></i>
                                 </button>
                             </div>
@@ -180,16 +227,23 @@
                                 <i data-lucide="{{ 'search-x' if search else 'package-x' }}" class="h-6 w-6"></i>
                             </span>
                             {% if search %}
-                                <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No items match "{{ search }}"</p>
+                                <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No products match "{{ search }}"</p>
                                 <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
                                     <a href="{{ url_for('main.supplier_products', supplier_id=supplier.id) }}"
-                                       class="text-brand-600 hover:underline dark:text-brand-400">Clear the search</a>
-                                    to see all prices.
+                                       class="text-brand-600 hover:underline dark:text-brand-400">Clear the filters</a>
+                                    to see everything.
+                                </p>
+                            {% elif has_price_code %}
+                                <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">
+                                    No products under {{ price_code if price_code else 'this price code' }} yet
+                                </p>
+                                <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                    Use <span class="font-medium">Add Product</span> to record the first one.
                                 </p>
                             {% else %}
-                                <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No prices recorded</p>
+                                <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No products recorded</p>
                                 <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                                    Add the first price for this supplier.
+                                    Choose a price code above, then add the supplier's first product.
                                 </p>
                             {% endif %}
                         </td>
@@ -210,7 +264,8 @@
             </p>
 
             {% macro page_url(p) -%}
-                {{ url_for('main.supplier_products', supplier_id=supplier.id, page=p, q=search or None) }}
+                {{ url_for('main.supplier_products', supplier_id=supplier.id, page=p,
+                           q=search or None, priceCode=price_code if has_price_code else none) }}
             {%- endmacro %}
 
             <nav class="flex items-center gap-1" aria-label="Pagination">
@@ -268,7 +323,7 @@
         <form id="recordForm" method="POST"
               action="{{ url_for('main.supplier_products_add', supplier_id=supplier.id) }}">
             <div class="modal-header">
-                <h3 class="modal-title" id="recordModalTitle">Add Price</h3>
+                <h3 class="modal-title" id="recordModalTitle">Add Product</h3>
                 <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
                     <i data-lucide="x" class="h-4 w-4"></i>
                 </button>
@@ -299,25 +354,21 @@
                     </p>
                 </div>
 
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div class="sm:col-span-2">
                         <label class="label" for="catalogInput">Catalog <span class="text-accent-600">*</span></label>
                         <input type="text" class="input font-mono" id="catalogInput" name="catalog" required
                                list="catalogOptions" autocomplete="off" placeholder="e.g. 6801234">
-                        <datalist id="catalogOptions">
-                            {% for c in catalog_suggestions %}
-                                <option value="{{ c.catalog }}">{{ c.description or '' }}</option>
-                            {% endfor %}
-                        </datalist>
-                        <p class="help">Pick an existing catalog or type a new one.</p>
+                        {# Options are rebuilt in JS so products already priced under
+                           the selected price code are left out. #}
+                        <datalist id="catalogOptions"></datalist>
+                        <p class="help">Products already priced under this code aren't listed. Type a new catalog to add one.</p>
                     </div>
                     <div>
                         <label class="label" for="fieldPriceCode">Price Code</label>
-                        <input type="text" class="input" id="fieldPriceCode" name="priceCode"
-                               list="priceCodeOptions" autocomplete="off" placeholder="Optional">
-                        <datalist id="priceCodeOptions">
-                            {% for pc in price_codes %}<option value="{{ pc }}"></option>{% endfor %}
-                        </datalist>
+                        <input type="text" class="input bg-slate-50 dark:bg-slate-800/50" id="fieldPriceCode"
+                               name="priceCode" autocomplete="off" readonly>
+                        <p class="help">Set by the picker above.</p>
                     </div>
                 </div>
 
@@ -394,7 +445,7 @@
     <div class="modal-panel max-w-md">
         <form id="deleteForm" method="POST" action="">
             <div class="modal-header">
-                <h3 class="modal-title">Delete price</h3>
+                <h3 class="modal-title">Delete product</h3>
                 <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
                     <i data-lucide="x" class="h-4 w-4"></i>
                 </button>
@@ -474,14 +525,44 @@
         var catalogInput = document.getElementById('catalogInput');
         var fieldCategory = document.getElementById('fieldCategory');
         var fieldUnit = document.getElementById('fieldUnit');
+        var fieldDescription = document.getElementById('fieldDescription');
+        var catalogOptions = document.getElementById('catalogOptions');
 
-        function syncCategoryFromCatalog() {
-            var info = CATALOG_INFO[catalogInput.value.trim()];
-            fieldCategory.value = info ? info.category : '';
+        // Catalogs this supplier already prices under the selected price code —
+        // computed server-side because the table is paginated.
+        var PRICED_CATALOGS = {{ priced_catalogs|tojson }};
+        var PRICE_CODE = {{ (price_code or '')|tojson }};
+
+        // Rebuild the catalog picker, leaving out anything already priced.
+        // `keepCatalog` re-admits the row's own catalog when editing it.
+        function refreshCatalogOptions(keepCatalog) {
+            var used = {};
+            PRICED_CATALOGS.forEach(function (c) { used[c] = true; });
+            if (keepCatalog) delete used[keepCatalog];
+
+            catalogOptions.innerHTML = '';
+            Object.keys(CATALOG_INFO).forEach(function (code) {
+                if (used[code]) return;
+                var opt = document.createElement('option');
+                opt.value = code;
+                opt.textContent = CATALOG_INFO[code].description || '';
+                catalogOptions.appendChild(opt);
+            });
         }
 
-        catalogInput.addEventListener('input', syncCategoryFromCatalog);
-        catalogInput.addEventListener('change', syncCategoryFromCatalog);
+        // Selecting a catalog fills description and category; description stays
+        // editable so it can be overridden per supplier.
+        function syncFromCatalog(overwriteDescription) {
+            var info = CATALOG_INFO[catalogInput.value.trim()];
+            if (!info) return;
+            fieldCategory.value = info.category || '';
+            if (overwriteDescription || !fieldDescription.value.trim()) {
+                fieldDescription.value = info.description || '';
+            }
+        }
+
+        catalogInput.addEventListener('input', function () { syncFromCatalog(true); });
+        catalogInput.addEventListener('change', function () { syncFromCatalog(true); });
 
         // The unit is part of what identifies a price line (catalog + price code +
         // unit), so it is locked once a row exists — changing it would silently
@@ -511,7 +592,9 @@
             showEditNote(false);
             setField('fieldEffectiveDate', todayIso());
             setField('fieldCategory', '');
-            modalTitle.textContent = 'Add Price';
+            setField('fieldPriceCode', PRICE_CODE);   // fixed by the picker above
+            refreshCatalogOptions(null);              // hide already-priced products
+            modalTitle.textContent = 'Add Product';
             catalogInput.readOnly = false;
             lockUnit(false);          // new line: unit is still being chosen
             OS.openModal('recordModal');
@@ -531,11 +614,13 @@
             // Keep the row's own category; only fall back to the catalog default
             // if this row never had one.
             setField('fieldCategory', row.getAttribute('data-category'));
-            if (!fieldCategory.value) syncCategoryFromCatalog();
+            if (!fieldCategory.value) syncFromCatalog(false);
+            // Keep this row's own catalog available while editing it.
+            refreshCatalogOptions(row.getAttribute('data-catalog'));
 
             showSupersede(false);
             showEditNote(true);
-            modalTitle.textContent = 'Edit Price';
+            modalTitle.textContent = 'Edit Product';
             catalogInput.readOnly = false;
             lockUnit(true);           // unit identifies the line - don't let it drift
             OS.openModal('recordModal');
@@ -558,6 +643,8 @@
             document.getElementById('supersedeOldPrice').textContent = peso(row.getAttribute('data-price'));
             showSupersede(true);
             showEditNote(false);
+            // Superseding an existing line, so its own catalog must stay pickable.
+            refreshCatalogOptions(row.getAttribute('data-catalog'));
 
             modalTitle.textContent = 'Add Newer Price';
             // Catalog and unit both identify the line being superseded, so both
@@ -630,6 +717,66 @@
         searchInput.addEventListener('search', function () {
             if (searchInput.value === '') document.getElementById('searchForm').submit();
         });
+
+        /* ------------------------------------------------------- price code */
+        // Applying the code reloads the page: the list, the "already priced"
+        // catalog set and the Add button's enabled state all come from the server.
+
+        var priceCodeForm = document.getElementById('priceCodeForm');
+        var priceCodeFilter = document.getElementById('priceCodeFilter');
+        var priceCodeDropdown = document.getElementById('priceCodeDropdown');
+        var PRICE_CODES = {{ price_codes|tojson }};
+
+        function renderPriceCodeOptions(filterText) {
+            var term = (filterText || '').trim().toLowerCase();
+            var matches = PRICE_CODES.filter(function (pc) {
+                return !term || pc.toLowerCase().indexOf(term) !== -1;
+            });
+
+            priceCodeDropdown.innerHTML = '';
+            if (!matches.length) {
+                var empty = document.createElement('p');
+                empty.className = 'px-3 py-2 text-sm text-slate-400';
+                empty.textContent = PRICE_CODES.length
+                    ? 'No matching price codes — press Enter to use it as a new one'
+                    : 'No price codes yet — type one and press Enter';
+                priceCodeDropdown.appendChild(empty);
+                return;
+            }
+
+            matches.forEach(function (pc) {
+                var opt = document.createElement('button');
+                opt.type = 'button';
+                opt.className = 'block w-full truncate px-3 py-1.5 text-left text-sm text-slate-700 ' +
+                                'hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700';
+                opt.textContent = pc;
+                opt.addEventListener('click', function () {
+                    priceCodeFilter.value = pc;
+                    priceCodeForm.submit();
+                });
+                priceCodeDropdown.appendChild(opt);
+            });
+        }
+
+        // Opening the field always lists every code; typing narrows it live.
+        priceCodeFilter.addEventListener('click', function () {
+            renderPriceCodeOptions('');
+        });
+
+        priceCodeFilter.addEventListener('input', function () {
+            renderPriceCodeOptions(priceCodeFilter.value);
+            priceCodeDropdown.classList.remove('hidden');
+        });
+
+        // Enter applies whatever is typed, so a brand-new code can be used.
+        priceCodeFilter.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                priceCodeForm.submit();
+            }
+        });
+
+        renderPriceCodeOptions('');
     })();
 </script>
 {% endblock %}
