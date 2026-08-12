@@ -321,21 +321,15 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <div class="sm:col-span-2">
-                        <label class="label" for="fieldDescription">Description</label>
-                        <input type="text" class="input" id="fieldDescription" name="description"
-                               placeholder="Product description">
-                    </div>
-                    <div>
-                        <label class="label" for="fieldCategory">Category</label>
-                        <input type="text" class="input" id="fieldCategory" name="category"
-                               list="categoryOptions" autocomplete="off" placeholder="Optional">
-                        <datalist id="categoryOptions">
-                            {% for c in product_categories %}<option value="{{ c }}"></option>{% endfor %}
-                        </datalist>
-                    </div>
+                <div>
+                    <label class="label" for="fieldDescription">Description</label>
+                    <input type="text" class="input" id="fieldDescription" name="description"
+                           placeholder="Product description">
                 </div>
+
+                {# Category is set automatically from the inventory master when the
+                   catalog matches, so it isn't shown here — same as customer products. #}
+                <input type="hidden" id="fieldCategory" name="category">
 
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <div>
@@ -345,6 +339,9 @@
                         <datalist id="unitOptions">
                             {% for u in units %}<option value="{{ u }}"></option>{% endfor %}
                         </datalist>
+                        <p class="help hidden" id="unitLockedHint">
+                            <i data-lucide="lock" class="mr-1 inline h-3 w-3"></i>Fixed for this price line.
+                        </p>
                     </div>
                     <div>
                         <label class="label" for="fieldPrice">Price <span class="text-accent-600">*</span></label>
@@ -466,6 +463,37 @@
 
         function setField(id, value) { document.getElementById(id).value = value || ''; }
 
+        // catalog -> {description, category} from the inventory master and this
+        // supplier's existing lines, used to auto-fill the hidden category field.
+        var CATALOG_INFO = {
+            {%- for c in catalog_suggestions %}
+            {{ c.catalog|tojson }}: {{ {'description': c.description or '', 'category': c.category or ''}|tojson }}{{ "," if not loop.last }}
+            {%- endfor %}
+        };
+
+        var catalogInput = document.getElementById('catalogInput');
+        var fieldCategory = document.getElementById('fieldCategory');
+        var fieldUnit = document.getElementById('fieldUnit');
+
+        function syncCategoryFromCatalog() {
+            var info = CATALOG_INFO[catalogInput.value.trim()];
+            fieldCategory.value = info ? info.category : '';
+        }
+
+        catalogInput.addEventListener('input', syncCategoryFromCatalog);
+        catalogInput.addEventListener('change', syncCategoryFromCatalog);
+
+        // The unit is part of what identifies a price line (catalog + price code +
+        // unit), so it is locked once a row exists — changing it would silently
+        // move the price onto a different line instead of correcting this one.
+        function lockUnit(locked) {
+            fieldUnit.readOnly = locked;
+            fieldUnit.classList.toggle('bg-slate-50', locked);
+            fieldUnit.classList.toggle('dark:bg-slate-800/50', locked);
+            fieldUnit.classList.toggle('cursor-not-allowed', locked);
+            document.getElementById('unitLockedHint').classList.toggle('hidden', !locked);
+        }
+
         function showNote(el, show) {
             el.classList.toggle('hidden', !show);
             el.classList.toggle('flex', show);
@@ -482,8 +510,10 @@
             showSupersede(false);
             showEditNote(false);
             setField('fieldEffectiveDate', todayIso());
+            setField('fieldCategory', '');
             modalTitle.textContent = 'Add Price';
-            document.getElementById('catalogInput').readOnly = false;
+            catalogInput.readOnly = false;
+            lockUnit(false);          // new line: unit is still being chosen
             OS.openModal('recordModal');
         }
 
@@ -494,16 +524,20 @@
             recordForm.action = editUrl(row.getAttribute('data-id'));
             setField('catalogInput', row.getAttribute('data-catalog'));
             setField('fieldDescription', row.getAttribute('data-description'));
-            setField('fieldCategory', row.getAttribute('data-category'));
             setField('fieldPriceCode', row.getAttribute('data-price-code'));
             setField('fieldUnit', row.getAttribute('data-unit'));
             setField('fieldPrice', row.getAttribute('data-price'));
             setField('fieldEffectiveDate', row.getAttribute('data-effective-date') || todayIso());
+            // Keep the row's own category; only fall back to the catalog default
+            // if this row never had one.
+            setField('fieldCategory', row.getAttribute('data-category'));
+            if (!fieldCategory.value) syncCategoryFromCatalog();
 
             showSupersede(false);
             showEditNote(true);
             modalTitle.textContent = 'Edit Price';
-            document.getElementById('catalogInput').readOnly = false;
+            catalogInput.readOnly = false;
+            lockUnit(true);           // unit identifies the line - don't let it drift
             OS.openModal('recordModal');
         }
 
@@ -526,7 +560,10 @@
             showEditNote(false);
 
             modalTitle.textContent = 'Add Newer Price';
-            document.getElementById('catalogInput').readOnly = true;
+            // Catalog and unit both identify the line being superseded, so both
+            // stay fixed — otherwise this would create a new line, not a new price.
+            catalogInput.readOnly = true;
+            lockUnit(true);
             OS.openModal('recordModal');
             window.setTimeout(function () { document.getElementById('fieldPrice').focus(); }, 60);
         }

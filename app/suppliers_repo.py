@@ -2,6 +2,9 @@ from .db import get_connection
 
 
 def list_active_suppliers():
+    """Only suppliers with status 'Active'. Inactive ones stay in the table (and
+    keep their price history) but are deliberately not listed — set a supplier
+    back to Active in the database to bring it back into this list."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -10,7 +13,7 @@ def list_active_suppliers():
                 SELECT s.*, COUNT(sp.id) AS productCount
                 FROM tbl_suppliers s
                 LEFT JOIN tbl_suppliers_products sp ON sp.supplierId = s.id AND sp.isDeleted = 0
-                WHERE s.isDeleted = 0
+                WHERE s.isDeleted = 0 AND s.status = 'Active'
                 GROUP BY s.id
                 ORDER BY s.name ASC, s.id ASC
                 """
@@ -207,9 +210,16 @@ def list_products_for_supplier(supplier_id, search=None, limit=None, offset=0):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
+            # versionCount counts DISTINCT (price, effectiveDate) pairs so the badge
+            # matches what list_price_history() actually shows — exact duplicate
+            # legacy rows must not inflate it. CONCAT_WS keeps NULL prices/dates
+            # countable, which COUNT(DISTINCT a, b) would otherwise skip.
             sql = """
                 SELECT sp.*,
-                    (SELECT COUNT(*) FROM tbl_suppliers_products h
+                    (SELECT COUNT(DISTINCT CONCAT_WS('|',
+                                COALESCE(CAST(h.price AS CHAR), '~'),
+                                COALESCE(CAST(h.effectiveDate AS CHAR), '~')))
+                     FROM tbl_suppliers_products h
                      WHERE h.supplierId = sp.supplierId
                         AND h.catalog <=> sp.catalog
                         AND h.priceCode <=> sp.priceCode
@@ -236,18 +246,31 @@ def list_products_for_supplier(supplier_id, search=None, limit=None, offset=0):
 
 
 def list_price_history(supplier_id, catalog, price_code, unit):
-    """Every price ever recorded for one catalog line, newest first."""
+    """Every distinct price ever recorded for one catalog line, newest first.
+
+    Grouped by (price, effectiveDate) because the legacy data contains exact
+    duplicate rows — the same price on the same date imported more than once —
+    which otherwise showed up as repeated identical history entries. Only truly
+    identical rows collapse; two different prices on the same date remain
+    separate entries."""
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT sp.*, u.name AS createdByName
+                SELECT
+                    MIN(sp.id)          AS id,
+                    sp.price            AS price,
+                    sp.effectiveDate    AS effectiveDate,
+                    MIN(sp.createdAt)   AS createdAt,
+                    COUNT(*)            AS duplicateCount,
+                    MIN(u.name)         AS createdByName
                 FROM tbl_suppliers_products sp
                 LEFT JOIN tbl_users u ON u.id = sp.createdBy
                 WHERE sp.supplierId = %s AND sp.isDeleted = 0
                     AND sp.catalog <=> %s AND sp.priceCode <=> %s AND sp.unit <=> %s
-                ORDER BY COALESCE(sp.effectiveDate, '1900-01-01') DESC, sp.id DESC
+                GROUP BY sp.price, sp.effectiveDate
+                ORDER BY COALESCE(sp.effectiveDate, '1900-01-01') DESC, MIN(sp.id) DESC
                 """,
                 (supplier_id, catalog, price_code, unit),
             )
@@ -324,11 +347,11 @@ def list_catalog_suggestions(supplier_id):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT catalog, MAX(description) AS description FROM (
-                    SELECT catalog, description FROM tbl_suppliers_products
+                SELECT catalog, MAX(description) AS description, MAX(category) AS category FROM (
+                    SELECT catalog, description, category FROM tbl_suppliers_products
                     WHERE isDeleted = 0 AND supplierId = %s AND catalog IS NOT NULL AND catalog <> ''
                     UNION ALL
-                    SELECT catalog, description FROM tbl_inventory_items
+                    SELECT catalog, description, category FROM tbl_inventory_items
                     WHERE isDeleted = 0 AND catalog IS NOT NULL AND catalog <> ''
                 ) t
                 GROUP BY catalog
@@ -418,32 +441,6 @@ def update_product(product_id, data, updated_by):
                     product_id,
                 ),
             )
-    finally:
-        conn.close()
-
-
-def list_distinct_product_categories():
-    """Suggestions only — the field is free text. Pulls from supplier products,
-    the inventory master, and customer products, because product categories are
-    one shared vocabulary (the inventory master alone only carries 'VITROS',
-    while 'Other Products' exists solely on customer rows)."""
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT category FROM tbl_suppliers_products
-                WHERE isDeleted = 0 AND category IS NOT NULL AND category <> ''
-                UNION
-                SELECT category FROM tbl_inventory_items
-                WHERE isDeleted = 0 AND category IS NOT NULL AND category <> ''
-                UNION
-                SELECT category FROM tbl_customers_products
-                WHERE isDeleted = 0 AND category IS NOT NULL AND category <> ''
-                ORDER BY category ASC
-                """
-            )
-            return [row["category"] for row in cur.fetchall()]
     finally:
         conn.close()
 

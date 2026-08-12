@@ -165,3 +165,22 @@ LEFT JOIN db_os_2026.tbl_users mu
 LEFT JOIN db_os_2026.tbl_inventory_items inv
     ON inv.catalog = TRIM(p.Catalog) COLLATE utf8mb4_unicode_ci
    AND inv.isDeleted = 0;
+
+-- 4) Drop exact duplicate price rows.
+--    The legacy table stores the same price for the same catalog line on the
+--    same effective date more than once (an artefact of how prices were
+--    re-imported there, not real price history). Left alone these show up as
+--    repeated identical entries in the price-history view. Step 3 imports
+--    faithfully first and this removes only rows that are identical on every
+--    meaningful column, keeping the lowest id of each set. Two different prices
+--    on the same date are NOT touched — that is genuine history.
+DELETE dup
+FROM db_os_2026.tbl_suppliers_products dup
+JOIN db_os_2026.tbl_suppliers_products keep
+    ON  keep.supplierId    =   dup.supplierId
+    AND keep.catalog      <=>  dup.catalog
+    AND keep.priceCode    <=>  dup.priceCode
+    AND keep.unit         <=>  dup.unit
+    AND keep.price        <=>  dup.price
+    AND keep.effectiveDate<=>  dup.effectiveDate
+    AND keep.id            <   dup.id;

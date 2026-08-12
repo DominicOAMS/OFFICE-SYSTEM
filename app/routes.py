@@ -345,7 +345,6 @@ def supplier_products(supplier_id):
         units=suppliers_repo.list_allowed_units(),
         price_codes=suppliers_repo.list_price_codes_for_supplier(supplier_id),
         catalog_suggestions=suppliers_repo.list_catalog_suggestions(supplier_id),
-        product_categories=suppliers_repo.list_distinct_product_categories(),
         search=search,
         page=page,
         page_count=page_count,
