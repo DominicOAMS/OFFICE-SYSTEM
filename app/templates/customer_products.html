@@ -24,13 +24,14 @@
             </div>
         </div>
         <div class="flex items-end gap-3">
-            <div>
+            <div class="relative" data-dropdown>
                 <label class="label" for="priceCodeFilter">Price Code</label>
-                <input type="text" id="priceCodeFilter" list="priceCodeSuggestions" autocomplete="off"
+                <input type="text" id="priceCodeFilter" autocomplete="off" data-dropdown-toggle
                        class="input w-56" placeholder="Type or pick a price code…">
-                <datalist id="priceCodeSuggestions">
-                    {% for pc in price_codes %}<option value="{{ pc }}"></option>{% endfor %}
-                </datalist>
+                <div id="priceCodeDropdown" data-dropdown-panel
+                     class="hidden absolute z-20 mt-1 max-h-56 w-56 overflow-y-auto rounded-xl border
+                            border-slate-200 bg-white py-1 shadow-lg shadow-slate-900/5 dark:border-slate-700 dark:bg-slate-800">
+                </div>
             </div>
             <button type="button" class="btn btn-primary" id="addNewBtn" disabled title="Choose a price code first">
                 <i data-lucide="package-plus" class="h-4 w-4"></i>
@@ -303,13 +304,51 @@
 
         /* ------------------------------------------------------- price code */
 
+        var priceCodeDropdown = document.getElementById('priceCodeDropdown');
+
         function updateAddButtonState() {
             addNewBtn.disabled = !priceCodeFilter.value.trim();
+        }
+
+        function renderPriceCodeOptions(filterText) {
+            var term = (filterText || '').trim().toLowerCase();
+            var matches = priceCodes.filter(function (pc) {
+                return !term || pc.toLowerCase().indexOf(term) !== -1;
+            });
+            priceCodeDropdown.innerHTML = '';
+            if (!matches.length) {
+                var empty = document.createElement('p');
+                empty.className = 'px-3 py-2 text-sm text-slate-400';
+                empty.textContent = 'No matching price codes';
+                priceCodeDropdown.appendChild(empty);
+                return;
+            }
+            matches.forEach(function (pc) {
+                var opt = document.createElement('button');
+                opt.type = 'button';
+                opt.className = 'block w-full truncate px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700';
+                opt.textContent = pc;
+                opt.addEventListener('click', function () {
+                    priceCodeFilter.value = pc;
+                    updateAddButtonState();
+                    applyFilters();
+                });
+                priceCodeDropdown.appendChild(opt);
+            });
         }
 
         priceCodeFilter.addEventListener('input', function () {
             updateAddButtonState();
             applyFilters();
+            renderPriceCodeOptions(priceCodeFilter.value);
+            priceCodeDropdown.classList.remove('hidden');
+        });
+
+        // Clicking/focusing the field always shows every price code (not just
+        // ones matching whatever is already typed) — the dropdown toggle
+        // itself (open/close) is handled by the site-wide [data-dropdown] logic.
+        priceCodeFilter.addEventListener('click', function () {
+            renderPriceCodeOptions('');
         });
 
         var justUsedPriceCode = new URLSearchParams(window.location.search).get('priceCode');
