@@ -182,7 +182,14 @@ def list_products_for_customer(customer_id):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT cp.* FROM tbl_customers_products cp
+                SELECT cp.*,
+                    (SELECT COUNT(*) FROM tbl_customers_products h
+                     WHERE h.customerId = cp.customerId
+                        AND h.catalog <=> cp.catalog
+                        AND h.priceCode <=> cp.priceCode
+                        AND h.unit <=> cp.unit
+                        AND h.isDeleted = 0) AS versionCount
+                FROM tbl_customers_products cp
                 WHERE cp.customerId = %s AND cp.isDeleted = 0
                     AND (cp.effectiveDate IS NULL OR cp.effectiveDate <= CURDATE())
                     AND NOT EXISTS (
@@ -204,6 +211,27 @@ def list_products_for_customer(customer_id):
                 ORDER BY cp.id DESC
                 """,
                 (customer_id,),
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def list_price_history(customer_id, catalog, price_code, unit):
+    """Every price ever recorded for one catalog line, newest first."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT cp.*, u.name AS createdByName
+                FROM tbl_customers_products cp
+                LEFT JOIN tbl_users u ON u.id = cp.createdBy
+                WHERE cp.customerId = %s AND cp.isDeleted = 0
+                    AND cp.catalog <=> %s AND cp.priceCode <=> %s AND cp.unit <=> %s
+                ORDER BY COALESCE(cp.effectiveDate, '1900-01-01') DESC, cp.id DESC
+                """,
+                (customer_id, catalog, price_code, unit),
             )
             return cur.fetchall()
     finally:

@@ -222,6 +222,21 @@ def customer_products_add(customer_id):
     return redirect(url_for("main.customer_products", **redirect_args))
 
 
+@main_bp.route("/page/parameters_customers/<int:customer_id>/products/history")
+@login_required
+def customer_product_history(customer_id):
+    """Price history for one catalog line, rendered into the history modal."""
+    if not customers_repo.get_customer(customer_id):
+        abort(404)
+    rows = customers_repo.list_price_history(
+        customer_id,
+        request.args.get("catalog") or None,
+        request.args.get("priceCode") or None,
+        request.args.get("unit") or None,
+    )
+    return render_template("_price_history.html", rows=rows)
+
+
 @main_bp.route("/page/parameters_customers/<int:customer_id>/products/<int:product_id>/delete", methods=["POST"])
 @login_required
 def customer_products_delete(customer_id, product_id):
