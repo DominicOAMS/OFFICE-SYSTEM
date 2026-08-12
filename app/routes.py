@@ -354,12 +354,19 @@ def supplier_products(supplier_id):
         abort(404)
 
     search = request.args.get("q", "").strip()
+    # A price code must be chosen before a product can be added, so the list is
+    # scoped to it too. "not supplied at all" differs from "supplied as blank".
+    has_price_code = "priceCode" in request.args
+    price_code = request.args.get("priceCode", "").strip()
+
     try:
         page = max(1, int(request.args.get("page", 1)))
     except ValueError:
         page = 1
 
-    total = suppliers_repo.count_products_for_supplier(supplier_id, search or None)
+    total = suppliers_repo.count_products_for_supplier(
+        supplier_id, search or None, price_code, has_price_code
+    )
     page_count = max(1, -(-total // SUPPLIER_PRODUCTS_PER_PAGE))  # ceil
     page = min(page, page_count)
 
@@ -368,7 +375,16 @@ def supplier_products(supplier_id):
         search=search or None,
         limit=SUPPLIER_PRODUCTS_PER_PAGE,
         offset=(page - 1) * SUPPLIER_PRODUCTS_PER_PAGE,
+        price_code=price_code,
+        has_price_code=has_price_code,
     )
+
+    # Catalogs already priced under this code are excluded from the picker so the
+    # same product can't be added twice against one price code.
+    priced_catalogs = (
+        suppliers_repo.list_priced_catalogs(supplier_id, price_code) if has_price_code else []
+    )
+
     return render_template(
         "supplier_products.html",
         supplier=supplier,
@@ -376,11 +392,26 @@ def supplier_products(supplier_id):
         units=suppliers_repo.list_allowed_units(),
         price_codes=suppliers_repo.list_price_codes_for_supplier(supplier_id),
         catalog_suggestions=suppliers_repo.list_catalog_suggestions(supplier_id),
+        priced_catalogs=priced_catalogs,
         search=search,
+        price_code=price_code,
+        has_price_code=has_price_code,
         page=page,
         page_count=page_count,
         total=total,
         per_page=SUPPLIER_PRODUCTS_PER_PAGE,
+    )
+
+
+def _back_to_products(supplier_id, data=None):
+    """Return to the price list with the price code still selected, so the user
+    stays in the context they were adding under."""
+    return redirect(
+        url_for(
+            "main.supplier_products",
+            supplier_id=supplier_id,
+            priceCode=(data or {}).get("priceCode") or request.form.get("priceCode", ""),
+        )
     )
 
 
@@ -390,17 +421,17 @@ def supplier_products_add(supplier_id):
     data = _parse_supplier_product_form()
     if not data["catalog"] or not data["price"]:
         flash("Catalog and price are required.", "error")
-        return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+        return _back_to_products(supplier_id, data)
     if suppliers_repo.product_price_exists(supplier_id, data):
         flash(
             "That exact price (same catalog, price code, unit, price and effective date) is already on file.",
             "error",
         )
-        return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+        return _back_to_products(supplier_id, data)
 
     suppliers_repo.create_product(supplier_id, data, created_by=session.get("user_id"))
-    flash(f'Price for "{data["catalog"]}" added.', "success")
-    return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+    flash(f'Product "{data["catalog"]}" added.', "success")
+    return _back_to_products(supplier_id, data)
 
 
 @main_bp.route("/page/parameters_suppliers/<int:supplier_id>/products/<int:product_id>/edit", methods=["POST"])
@@ -413,17 +444,17 @@ def supplier_products_edit(supplier_id, product_id):
     data = _parse_supplier_product_form()
     if not data["catalog"] or not data["price"]:
         flash("Catalog and price are required.", "error")
-        return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+        return _back_to_products(supplier_id, data)
     if suppliers_repo.product_price_exists(supplier_id, data, exclude_id=product_id):
         flash(
             "Another row already has that exact catalog, price code, unit, price and effective date.",
             "error",
         )
-        return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+        return _back_to_products(supplier_id, data)
 
     suppliers_repo.update_product(product_id, data, updated_by=session.get("user_id"))
-    flash(f'Price for "{data["catalog"]}" updated.', "success")
-    return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+    flash(f'Product "{data["catalog"]}" updated.', "success")
+    return _back_to_products(supplier_id, data)
 
 
 @main_bp.route("/page/parameters_suppliers/<int:supplier_id>/products/<int:product_id>/delete", methods=["POST"])

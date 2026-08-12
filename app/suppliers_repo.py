@@ -187,24 +187,64 @@ _SEARCH_WHERE = """
     AND (sp.catalog LIKE %s OR sp.description LIKE %s OR sp.priceCode LIKE %s)
 """
 
+_PRICE_CODE_WHERE = " AND sp.priceCode <=> %s"
 
-def count_products_for_supplier(supplier_id, search=None):
+
+def _filter_clauses(search, price_code, has_price_code):
+    """Shared WHERE tail + params for the list/count queries. `has_price_code`
+    distinguishes "no price code chosen" (show everything) from an explicitly
+    blank code, which legitimately matches the rows that have none."""
+    sql = ""
+    params = []
+    if has_price_code:
+        sql += _PRICE_CODE_WHERE
+        params.append(price_code or None)
+    if search:
+        sql += _SEARCH_WHERE
+        like = "%" + search + "%"
+        params += [like, like, like]
+    return sql, params
+
+
+def count_products_for_supplier(supplier_id, search=None, price_code=None, has_price_code=False):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             sql = "SELECT COUNT(*) AS n FROM tbl_suppliers_products sp WHERE " + _CURRENT_PRICE_WHERE
             params = [supplier_id]
-            if search:
-                sql += _SEARCH_WHERE
-                like = "%" + search + "%"
-                params += [like, like, like]
+            extra_sql, extra_params = _filter_clauses(search, price_code, has_price_code)
+            sql += extra_sql
+            params += extra_params
             cur.execute(sql, params)
             return cur.fetchone()["n"]
     finally:
         conn.close()
 
 
-def list_products_for_supplier(supplier_id, search=None, limit=None, offset=0):
+def list_priced_catalogs(supplier_id, price_code):
+    """Catalogs this supplier already has a live price for under one price code.
+    Used to keep already-priced products out of the Add Product catalog picker —
+    computed server-side because the table is paginated, so the browser only
+    ever holds one page of rows."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT catalog FROM tbl_suppliers_products
+                WHERE supplierId = %s AND isDeleted = 0
+                    AND priceCode <=> %s
+                    AND catalog IS NOT NULL AND catalog <> ''
+                """,
+                (supplier_id, price_code or None),
+            )
+            return [row["catalog"] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def list_products_for_supplier(supplier_id, search=None, limit=None, offset=0,
+                               price_code=None, has_price_code=False):
     """Current prices for a supplier, newest-effective first within each catalog.
     Paginated because a single supplier can carry well over a thousand lines."""
     conn = get_connection()
@@ -229,10 +269,9 @@ def list_products_for_supplier(supplier_id, search=None, limit=None, offset=0):
                 WHERE
             """ + _CURRENT_PRICE_WHERE
             params = [supplier_id]
-            if search:
-                sql += _SEARCH_WHERE
-                like = "%" + search + "%"
-                params += [like, like, like]
+            extra_sql, extra_params = _filter_clauses(search, price_code, has_price_code)
+            sql += extra_sql
+            params += extra_params
 
             sql += " ORDER BY sp.catalog ASC, sp.id DESC"
             if limit is not None:
