@@ -83,7 +83,8 @@
                         data-category="{{ p.category or '' }}"
                         data-unit="{{ p.unit or '' }}"
                         data-price="{{ p.price if p.price is not none else '' }}"
-                        data-effective-date="{{ p.effectiveDate or '' }}">
+                        data-effective-date="{{ p.effectiveDate or '' }}"
+                        data-versions="{{ p.versionCount }}">
                         <td class="table-td font-mono">{{ p.catalog }}</td>
                         <td class="table-td">{{ p.customerDescription or '—' }}</td>
                         <td class="table-td">
@@ -96,6 +97,16 @@
                         <td class="table-td">{{ p.effectiveDate or '—' }}</td>
                         <td class="table-td">
                             <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-history relative"
+                                        title="Price history" aria-label="Price history">
+                                    <i data-lucide="history" class="h-4 w-4"></i>
+                                    {% if p.versionCount > 1 %}
+                                        <span class="absolute -right-0.5 -top-0.5 grid h-4 min-w-[1rem] place-items-center
+                                                     rounded-full bg-brand-600 px-1 text-[10px] font-semibold text-white">
+                                            {{ p.versionCount }}
+                                        </span>
+                                    {% endif %}
+                                </button>
                                 <button type="button" class="btn btn-icon btn-ghost js-add-price" title="Add new price" aria-label="Add new price for this product">
                                     <i data-lucide="circle-plus" class="h-4 w-4"></i>
                                 </button>
@@ -204,6 +215,27 @@
                 </button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- ===================== Price history modal ===================== -->
+<div id="historyModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <div class="min-w-0">
+                <h3 class="modal-title">Price history</h3>
+                <p class="mt-0.5 truncate font-mono text-xs text-slate-500 dark:text-slate-400" id="historySubtitle"></p>
+            </div>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body" id="historyBody">
+            <p class="py-6 text-center text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
     </div>
 </div>
 
@@ -438,10 +470,45 @@
 
         addNewBtn.addEventListener('click', function () { openAddModal(null); });
 
+        /* --------------------------------------------------------- history */
+
+        var historyBody = document.getElementById('historyBody');
+        var historySubtitle = document.getElementById('historySubtitle');
+
+        function historyUrl() { return '/page/parameters_customers/' + customerId + '/products/history'; }
+
+        function openHistory(row) {
+            var catalog = row.getAttribute('data-catalog') || '';
+            var priceCode = row.getAttribute('data-price-code') || '';
+            var unit = row.getAttribute('data-unit') || '';
+
+            historySubtitle.textContent = catalog + (priceCode ? ' · ' + priceCode : '') + (unit ? ' · ' + unit : '');
+            historyBody.innerHTML = '<p class="py-6 text-center text-sm text-slate-500 dark:text-slate-400">Loading…</p>';
+            OS.openModal('historyModal');
+
+            var url = historyUrl()
+                    + '?catalog=' + encodeURIComponent(catalog)
+                    + '&priceCode=' + encodeURIComponent(priceCode)
+                    + '&unit=' + encodeURIComponent(unit);
+
+            fetch(url, { credentials: 'same-origin' })
+                .then(function (r) { return r.text(); })
+                .then(function (html) {
+                    historyBody.innerHTML = html;
+                    OS.refreshIcons();
+                })
+                .catch(function () {
+                    historyBody.innerHTML =
+                        '<p class="py-6 text-center text-sm text-rose-600 dark:text-rose-400">Could not load history.</p>';
+                });
+        }
+
         tbody.addEventListener('click', function (e) {
+            var histBtn = e.target.closest('.js-history');
             var addPriceBtn = e.target.closest('.js-add-price');
             var delBtn = e.target.closest('.js-delete');
 
+            if (histBtn) openHistory(histBtn.closest('tr'));
             if (addPriceBtn) openAddModal(addPriceBtn.closest('tr'));
 
             if (delBtn) {
