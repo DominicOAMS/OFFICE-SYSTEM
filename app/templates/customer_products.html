@@ -173,31 +173,31 @@
                     </div>
                 </div>
 
-                <div>
+                <div class="relative" data-dropdown>
                     <label class="label" for="catalogSearch">Catalog <span class="text-accent-600">*</span></label>
-                    <input type="text" class="input" id="catalogSearch" list="catalogOptions" autocomplete="off"
+                    <input type="text" class="input" id="catalogSearch" autocomplete="off" data-dropdown-toggle
                            placeholder="Search by catalog # or product name…" required>
-                    <datalist id="catalogOptions">
-                        {% for item in inventory_items %}
-                        <option value="{{ item.catalog }} — {{ item.description }}"></option>
-                        {% endfor %}
-                    </datalist>
+                    <div id="catalogDropdown" data-dropdown-panel
+                         class="hidden absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border
+                                border-slate-200 bg-white py-1 shadow-lg shadow-slate-900/5 dark:border-slate-700 dark:bg-slate-800">
+                    </div>
                     <input type="hidden" id="fieldCatalog" name="catalog">
+                    <input type="hidden" id="fieldMode" name="mode" value="add">
                     <p class="help">Only VITROS catalog items are searchable here for now. Type any other catalog number directly if it's not listed.</p>
                 </div>
 
                 <div>
                     <label class="label" for="fieldDescription">Description <span class="text-accent-600">*</span></label>
-                    <input type="text" class="input" id="fieldDescription" name="customerDescription" required>
+                    <input type="text" class="input" id="fieldDescription" name="customerDescription" autocomplete="off" required>
                 </div>
 
                 <input type="hidden" id="fieldCategory" name="category">
 
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
-                        <label class="label" for="fieldUnit">Unit</label>
-                        <select class="input" id="fieldUnit" name="unit">
-                            <option value="">Select unit</option>
+                        <label class="label" for="fieldUnit">Unit <span class="text-accent-600">*</span></label>
+                        <select class="input" id="fieldUnit" name="unit" required>
+                            <option value="" disabled selected>Select unit</option>
                             {% for u in units %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
                         </select>
                     </div>
@@ -314,6 +314,7 @@
             fieldUnit.innerHTML = '';
             var placeholder = document.createElement('option');
             placeholder.value = '';
+            placeholder.disabled = true;
             placeholder.textContent = 'Select unit';
             fieldUnit.appendChild(placeholder);
             allowed.forEach(function (u) {
@@ -395,7 +396,9 @@
 
         /* --------------------------------------------------- catalog search */
 
-        var catalogOptionsList = document.getElementById('catalogOptions');
+        var catalogDropdown = document.getElementById('catalogDropdown');
+        var currentCatalogPriceCode = '';
+        var currentCatalogExcludeId = null;
 
         function catalogsAlreadyPriced(priceCode, excludeId) {
             var used = {};
@@ -407,14 +410,51 @@
             return used;
         }
 
-        function refreshCatalogOptions(priceCode, excludeId) {
-            var used = catalogsAlreadyPriced(priceCode, excludeId);
-            catalogOptionsList.innerHTML = '';
-            inventoryItems.forEach(function (item) {
-                if (used[item.catalog]) return;
-                var opt = document.createElement('option');
-                opt.value = item.catalog + ' — ' + item.description;
-                catalogOptionsList.appendChild(opt);
+        // Sets which price code's already-priced catalogs to exclude — called
+        // once when the Add Product modal opens for a given price code/row.
+        function setCatalogContext(priceCode, excludeId) {
+            currentCatalogPriceCode = priceCode;
+            currentCatalogExcludeId = excludeId;
+        }
+
+        function selectCatalogItem(item) {
+            catalogSearch.value = item.catalog + ' — ' + item.description;
+            fieldCatalog.value = item.catalog;
+            fieldDescription.value = item.description || '';
+            document.getElementById('fieldCategory').value = item.category || '';
+            refreshUnitOptions(item, null);
+            catalogDropdown.classList.add('hidden');
+        }
+
+        // Rebuilt from scratch on every keystroke — matches on catalog number
+        // OR description, unlike the native <datalist> this replaced, which
+        // filtered unreliably as you typed.
+        function renderCatalogOptions(filterText) {
+            if (catalogSearch.readOnly) return;
+            var used = catalogsAlreadyPriced(currentCatalogPriceCode, currentCatalogExcludeId);
+            var term = (filterText || '').trim().toLowerCase();
+            var matches = inventoryItems.filter(function (item) {
+                if (used[item.catalog]) return false;
+                if (!term) return true;
+                return item.catalog.toLowerCase().indexOf(term) !== -1 ||
+                       (item.description || '').toLowerCase().indexOf(term) !== -1;
+            });
+
+            catalogDropdown.innerHTML = '';
+            if (!matches.length) {
+                var empty = document.createElement('p');
+                empty.className = 'px-3 py-2 text-sm text-slate-400';
+                empty.textContent = 'No matching catalog items';
+                catalogDropdown.appendChild(empty);
+                return;
+            }
+            matches.forEach(function (item) {
+                var opt = document.createElement('button');
+                opt.type = 'button';
+                opt.className = 'block w-full truncate px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700';
+                opt.textContent = item.catalog + ' — ' + item.description;
+                opt.addEventListener('click', function () { selectCatalogItem(item); });
+                catalogDropdown.appendChild(opt);
             });
         }
 
@@ -424,17 +464,21 @@
             var code = (sepIdx !== -1 ? raw.slice(0, sepIdx) : raw).trim();
             fieldCatalog.value = code;
             var item = findInventoryItem(code);
-            if (item) {
-                fieldDescription.value = item.description || '';
-                fieldCategory_setIfEmpty(item.category);
-            }
+            // No match — don't leave a previous selection's description/unit
+            // sitting there looking like it belongs to this (unmatched) catalog.
+            fieldDescription.value = item ? (item.description || '') : '';
+            document.getElementById('fieldCategory').value = item ? (item.category || '') : '';
             refreshUnitOptions(item, null);
+
+            renderCatalogOptions(raw);
+            catalogDropdown.classList.remove('hidden');
         });
 
-        function fieldCategory_setIfEmpty(value) {
-            var fieldCategory = document.getElementById('fieldCategory');
-            if (value) fieldCategory.value = value;
-        }
+        // Clicking/focusing the field always shows every remaining catalog
+        // item (not just ones matching whatever is already typed).
+        catalogSearch.addEventListener('click', function () {
+            renderCatalogOptions('');
+        });
 
         /* ------------------------------------------------------------ modals */
 
@@ -453,6 +497,7 @@
             fieldCatalog.value = catalog;
             catalogSearch.value = catalog;
             catalogSearch.readOnly = !!row;
+            document.getElementById('fieldMode').value = row ? 'reprice' : 'add';
             fieldPriceCode.value = priceCode;
             newPriceNote.classList.toggle('hidden', !row);
             modalTitle.textContent = row ? 'Add New Price — ' + catalog : 'Add Product';
@@ -462,10 +507,12 @@
                 document.getElementById('fieldCategory').value = row.getAttribute('data-category');
             }
 
-            refreshCatalogOptions(priceCode, id);
+            setCatalogContext(priceCode, id);
+            catalogDropdown.classList.add('hidden');
             refreshUnitOptions(row ? findInventoryItem(catalog) : null, row ? row.getAttribute('data-unit') : null);
             OS.openModal('recordModal');
-            window.setTimeout(function () { fieldEffectiveDate.focus(); }, 50);
+            var fieldToFocus = row ? document.getElementById('fieldPrice') : fieldEffectiveDate;
+            window.setTimeout(function () { fieldToFocus.focus(); }, 50);
         }
 
         addNewBtn.addEventListener('click', function () { openAddModal(null); });

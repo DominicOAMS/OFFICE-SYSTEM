@@ -210,8 +210,16 @@ def customer_products_add(customer_id):
     if data["priceCode"]:
         redirect_args["priceCode"] = data["priceCode"]
 
-    if not data["catalog"] or not data["price"] or not data["customerDescription"]:
-        flash("Catalog, description, and price are required.", "error")
+    if not data["catalog"] or not data["price"] or not data["customerDescription"] or not data["unit"]:
+        flash("Catalog, description, unit, and price are required.", "error")
+        return redirect(url_for("main.customer_products", **redirect_args))
+    is_new_product = request.form.get("mode", "add") != "reprice"
+    if is_new_product and customers_repo.catalog_priced_under_code(customer_id, data["catalog"], data["priceCode"]):
+        flash(
+            f'"{data["catalog"]}" already has a price under this price code — '
+            'use "Add new price" on that row instead.',
+            "error",
+        )
         return redirect(url_for("main.customer_products", **redirect_args))
     if customers_repo.product_price_exists(customer_id, data):
         flash("This exact price is already on file.", "error")

@@ -238,6 +238,28 @@ def list_price_history(customer_id, catalog, price_code, unit):
         conn.close()
 
 
+def catalog_priced_under_code(customer_id, catalog, price_code):
+    """Whether this catalog already has any active price under this price
+    code — used to block adding it again as a "new" product, since a second
+    price for an existing catalog+priceCode should go through "Add new
+    price" on that row instead (keeps the old price as history)."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1 FROM tbl_customers_products
+                WHERE customerId = %s AND isDeleted = 0
+                    AND catalog = %s AND priceCode <=> %s
+                LIMIT 1
+                """,
+                (customer_id, catalog, price_code),
+            )
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
 def product_price_exists(customer_id, data):
     conn = get_connection()
     try:
