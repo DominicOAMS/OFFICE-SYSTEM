@@ -27,18 +27,10 @@
 
     <div class="card overflow-hidden">
         <div class="card-header">
-            <!-- Status filter -->
-            <div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-800"
-                 id="statusFilter" role="group" aria-label="Filter by status">
-                {% for key, label in [('all', 'All'), ('Active', 'Active'), ('Inactive', 'Inactive')] %}
-                <button type="button" data-filter="{{ key }}"
-                        class="rounded-md px-3 py-1.5 text-sm font-medium transition
-                               {% if key == 'all' %}bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white active
-                               {% else %}text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200{% endif %}">
-                    {{ label }}
-                </button>
-                {% endfor %}
-            </div>
+            <h2 class="card-title">
+                <i data-lucide="truck" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Suppliers
+            </h2>
 
             <div class="flex items-center gap-2">
                 <div class="relative">
@@ -60,8 +52,7 @@
                         <th class="table-th">Supplier</th>
                         <th class="table-th w-24">Category</th>
                         <th class="table-th w-28">Price Type</th>
-                        <th class="table-th w-36">Terms</th>
-                        <th class="table-th w-24">Status</th>
+                        <th class="table-th w-40">Terms</th>
                         <th class="table-th w-24">Products</th>
                         <th class="table-th w-28 text-right">Actions</th>
                     </tr>
@@ -110,11 +101,6 @@
                             {% endif %}
                         </td>
                         <td class="table-td">
-                            <span class="badge {{ 'badge-success' if s.status == 'Active' else 'badge-slate' }}">
-                                {{ s.status }}
-                            </span>
-                        </td>
-                        <td class="table-td">
                             <a href="{{ url_for('main.supplier_products', supplier_id=s.id) }}"
                                class="badge badge-brand hover:ring-2 hover:ring-brand-600/30">
                                 <i data-lucide="package" class="h-3 w-3"></i>{{ s.productCount }}
@@ -139,7 +125,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="7" class="px-5 py-14 text-center">
+                        <td colspan="6" class="px-5 py-14 text-center">
                             <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
                                 <i data-lucide="truck" class="h-6 w-6"></i>
                             </span>
@@ -300,9 +286,6 @@
         var tbody = document.getElementById('recordsBody');
         var addUrl = "{{ url_for('main.suppliers_add') }}";
 
-        var ACTIVE_CLASSES = ['bg-white', 'text-slate-900', 'shadow-sm', 'dark:bg-slate-700', 'dark:text-white', 'active'];
-        var IDLE_CLASSES = ['text-slate-500', 'hover:text-slate-800', 'dark:text-slate-400', 'dark:hover:text-slate-200'];
-
         function editUrl(id) { return '/page/parameters_suppliers/' + id + '/edit'; }
         function deleteUrl(id) { return '/page/parameters_suppliers/' + id + '/delete'; }
 
@@ -351,20 +334,15 @@
             }
         });
 
-        /* -------------------------------------------------- search + filter */
+        /* --------------------------------------------------------- search */
+        // Only Active suppliers reach this page (see suppliers_repo), so there
+        // is no status filter here — just search.
 
         var search = document.getElementById('supplierSearch');
         var noResults = document.getElementById('noSearchResults');
-        var filterButtons = document.querySelectorAll('#statusFilter [data-filter]');
-
-        function currentStatusFilter() {
-            var active = document.querySelector('#statusFilter .active');
-            return active ? active.getAttribute('data-filter') : 'all';
-        }
 
         function applyFilters() {
             var term = search.value.trim().toLowerCase();
-            var status = currentStatusFilter();
             var shown = 0;
 
             tbody.querySelectorAll('tr[data-id]').forEach(function (row) {
@@ -376,10 +354,7 @@
                     (row.getAttribute('data-payment-term') || '')
                 ).toLowerCase();
 
-                var matchesTerm = !term || haystack.indexOf(term) !== -1;
-                var matchesStatus = status === 'all' || row.getAttribute('data-status') === status;
-                var show = matchesTerm && matchesStatus;
-
+                var show = !term || haystack.indexOf(term) !== -1;
                 row.classList.toggle('hidden', !show);
                 if (show) shown++;
             });
@@ -389,18 +364,6 @@
         }
 
         search.addEventListener('input', applyFilters);
-
-        filterButtons.forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                filterButtons.forEach(function (b) {
-                    b.classList.remove.apply(b.classList, ACTIVE_CLASSES);
-                    b.classList.add.apply(b.classList, IDLE_CLASSES);
-                });
-                btn.classList.remove.apply(btn.classList, IDLE_CLASSES);
-                btn.classList.add.apply(btn.classList, ACTIVE_CLASSES);
-                applyFilters();
-            });
-        });
 
         applyFilters();
     })();
