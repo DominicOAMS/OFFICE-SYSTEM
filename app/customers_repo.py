@@ -82,10 +82,10 @@ def create_customer(data, created_by):
             cur.execute(
                 """
                 INSERT INTO tbl_customers
-                    (code, name, address, tin, paymentTermDays, salesRep, customerType, vpSupplierId,
+                    (code, name, address, tin, paymentTermDays, salesRep, customerType,
                      isDeleted, createdBy, createdAt, updatedBy, updatedAt)
                 VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, %s,
+                    (%s, %s, %s, %s, %s, %s, %s,
                      0, %s, NOW(), %s, NOW())
                 """,
                 (
@@ -96,7 +96,6 @@ def create_customer(data, created_by):
                     data["paymentTermDays"],
                     data["salesRep"],
                     data["customerType"],
-                    data["vpSupplierId"],
                     created_by,
                     created_by,
                 ),
@@ -114,7 +113,7 @@ def update_customer(customer_id, data, updated_by):
                 """
                 UPDATE tbl_customers
                 SET code = %s, name = %s, address = %s, tin = %s, paymentTermDays = %s,
-                    salesRep = %s, customerType = %s, vpSupplierId = %s,
+                    salesRep = %s, customerType = %s,
                     updatedBy = %s, updatedAt = NOW()
                 WHERE id = %s
                 """,
@@ -126,13 +125,33 @@ def update_customer(customer_id, data, updated_by):
                     data["paymentTermDays"],
                     data["salesRep"],
                     data["customerType"],
-                    data["vpSupplierId"],
                     updated_by,
                     customer_id,
                 ),
             )
     finally:
         conn.close()
+
+
+def next_customer_id_number():
+    """Global counter matching the legacy generator: highest existing 3rd
+    hyphen-segment across all customer codes, plus one (e.g. "GLL-2026-120"
+    -> 120). Codes that don't follow that [Type][Area]-[Year]-[Number]
+    shape (legacy bare-numeric codes like "52") are simply skipped."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT code FROM tbl_customers WHERE isDeleted = 0")
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    highest = 0
+    for row in rows:
+        parts = (row["code"] or "").split("-")
+        if len(parts) > 2 and parts[2].isdigit():
+            highest = max(highest, int(parts[2]))
+    return highest + 1
 
 
 def soft_delete_customer(customer_id, updated_by):

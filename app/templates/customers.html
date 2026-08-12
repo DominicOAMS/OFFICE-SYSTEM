@@ -64,8 +64,7 @@
                         data-tin="{{ c.tin or '' }}"
                         data-payment-term-days="{{ c.paymentTermDays }}"
                         data-sales-rep="{{ c.salesRep or '' }}"
-                        data-customer-type="{{ c.customerType or '' }}"
-                        data-vp-supplier-id="{{ c.vpSupplierId or '' }}">
+                        data-customer-type="{{ c.customerType or '' }}">
                         <td class="table-td">
                             <div class="min-w-0">
                                 <p class="truncate font-medium text-slate-900 dark:text-white">{{ c.name }}</p>
@@ -139,6 +138,40 @@
             </div>
 
             <div class="modal-body space-y-5">
+                <div id="idGeneratorBox" class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                    <p class="text-sm font-medium text-slate-700 dark:text-slate-300">Customer ID</p>
+                    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <div>
+                            <label class="label" for="fieldCustomerType">Customer Type</label>
+                            <select class="input" id="fieldCustomerType" name="customerType">
+                                <option value="">Select type</option>
+                                {% for t in customer_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="label" for="genAreaCode">Area Code</label>
+                            <select class="input" id="genAreaCode">
+                                <option value="LL">LL - Lower Laguna</option>
+                                <option value="UL">UL - Upper Laguna</option>
+                                <option value="BA">BA - Batangas</option>
+                                <option value="CA">CA - Cavite</option>
+                                <option value="LU">LU - Lucena</option>
+                                <option value="BI">BI - Bicol</option>
+                                <option value="IS">IS - Ilocos Sur</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="label" for="genYear">Year Installed</label>
+                            <input type="number" class="input" id="genYear">
+                        </div>
+                        <div>
+                            <label class="label" for="genNextId">Next ID Number</label>
+                            <input type="number" class="input" id="genNextId" value="{{ next_id_number }}">
+                        </div>
+                    </div>
+                    <p class="help">Code auto-generates from Type + Area Code + Year + Number whenever any of these change, e.g. GLL-2026-120 for a Government customer in Lower Laguna.</p>
+                </div>
+
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <div>
                         <label class="label" for="fieldCode">Code <span class="text-accent-600">*</span></label>
@@ -153,28 +186,15 @@
                         <input type="number" min="0" class="input" id="fieldPaymentTermDays" name="paymentTermDays" value="0">
                     </div>
                     <div>
-                        <label class="label" for="fieldCustomerType">Type</label>
-                        <input type="text" class="input" id="fieldCustomerType" name="customerType"
-                               list="customerTypeOptions" autocomplete="off" placeholder="e.g. PRIVATE">
-                        <datalist id="customerTypeOptions">
-                            {% for t in customer_types %}<option value="{{ t }}"></option>{% endfor %}
-                        </datalist>
-                    </div>
-                    <div>
                         <label class="label" for="fieldSalesRep">Sales Rep</label>
-                        <input type="text" class="input" id="fieldSalesRep" name="salesRep"
-                               list="salesRepOptions" autocomplete="off">
-                        <datalist id="salesRepOptions">
-                            {% for s in sales_reps %}<option value="{{ s }}"></option>{% endfor %}
-                        </datalist>
+                        <select class="input" id="fieldSalesRep" name="salesRep">
+                            <option value="">Select sales rep</option>
+                            {% for s in sales_reps %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+                        </select>
                     </div>
                     <div>
                         <label class="label" for="fieldTin">TIN</label>
                         <input type="text" class="input" id="fieldTin" name="tin">
-                    </div>
-                    <div>
-                        <label class="label" for="fieldVpSupplierId">VP Supplier ID</label>
-                        <input type="text" class="input" id="fieldVpSupplierId" name="vpSupplierId">
                     </div>
                 </div>
 
@@ -239,27 +259,53 @@
         var tbody = document.getElementById('recordsBody');
         var addUrl = "{{ url_for('main.customers_add') }}";
 
+        var genYear = document.getElementById('genYear');
+        var genAreaCode = document.getElementById('genAreaCode');
+        var genNextId = document.getElementById('genNextId');
+        var fieldCode = document.getElementById('fieldCode');
+        var fieldCustomerType = document.getElementById('fieldCustomerType');
+
         function editUrl(id) { return '/page/parameters_customers/' + id + '/edit'; }
         function deleteUrl(id) { return '/page/parameters_customers/' + id + '/delete'; }
+
+        function regenerateCode() {
+            var typeLetter = (fieldCustomerType.value || '').trim().charAt(0).toUpperCase();
+            if (!typeLetter || !genAreaCode.value || !genYear.value || !genNextId.value) return;
+            fieldCode.value = typeLetter + genAreaCode.value + '-' + genYear.value + '-' + genNextId.value;
+        }
+
+        [fieldCustomerType, genAreaCode, genYear, genNextId].forEach(function (el) {
+            el.addEventListener('input', regenerateCode);
+            el.addEventListener('change', regenerateCode);
+        });
 
         function openAdd() {
             recordForm.reset();
             recordForm.action = addUrl;
             document.getElementById('fieldPaymentTermDays').value = 0;
+            genYear.value = new Date().getFullYear();
             modalTitle.textContent = 'Add New Customer';
             OS.openModal('recordModal');
         }
 
         function openEdit(row) {
             recordForm.action = editUrl(row.getAttribute('data-id'));
-            document.getElementById('fieldCode').value = row.getAttribute('data-code');
+            var code = row.getAttribute('data-code') || '';
+            document.getElementById('fieldCode').value = code;
             document.getElementById('fieldName').value = row.getAttribute('data-name');
             document.getElementById('fieldAddress').value = row.getAttribute('data-address');
             document.getElementById('fieldTin').value = row.getAttribute('data-tin');
             document.getElementById('fieldPaymentTermDays').value = row.getAttribute('data-payment-term-days') || 0;
             document.getElementById('fieldSalesRep').value = row.getAttribute('data-sales-rep');
-            document.getElementById('fieldCustomerType').value = row.getAttribute('data-customer-type');
-            document.getElementById('fieldVpSupplierId').value = row.getAttribute('data-vp-supplier-id');
+            fieldCustomerType.value = row.getAttribute('data-customer-type');
+
+            var match = /^[A-Z]([A-Z]{2,3})-(\d{4})-(\d+)$/.exec(code);
+            if (match) {
+                genAreaCode.value = match[1];
+                genYear.value = match[2];
+                genNextId.value = match[3];
+            }
+
             modalTitle.textContent = 'Edit Customer';
             OS.openModal('recordModal');
         }

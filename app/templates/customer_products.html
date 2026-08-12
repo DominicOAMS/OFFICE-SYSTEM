@@ -24,13 +24,14 @@
             </div>
         </div>
         <div class="flex items-end gap-3">
-            <div>
+            <div class="relative" data-dropdown>
                 <label class="label" for="priceCodeFilter">Price Code</label>
-                <input type="text" id="priceCodeFilter" list="priceCodeSuggestions" autocomplete="off"
+                <input type="text" id="priceCodeFilter" autocomplete="off" data-dropdown-toggle
                        class="input w-56" placeholder="Type or pick a price code…">
-                <datalist id="priceCodeSuggestions">
-                    {% for pc in price_codes %}<option value="{{ pc }}"></option>{% endfor %}
-                </datalist>
+                <div id="priceCodeDropdown" data-dropdown-panel
+                     class="hidden absolute z-20 mt-1 max-h-56 w-56 overflow-y-auto rounded-xl border
+                            border-slate-200 bg-white py-1 shadow-lg shadow-slate-900/5 dark:border-slate-700 dark:bg-slate-800">
+                </div>
             </div>
             <button type="button" class="btn btn-primary" id="addNewBtn" disabled title="Choose a price code first">
                 <i data-lucide="package-plus" class="h-4 w-4"></i>
@@ -259,6 +260,7 @@
 
         var inventoryItems = {{ inventory_items | tojson }};
         var allUnits = {{ units | tojson }};
+        var priceCodes = {{ price_codes | tojson }};
 
         function findInventoryItem(catalogCode) {
             for (var i = 0; i < inventoryItems.length; i++) {
@@ -302,24 +304,61 @@
 
         /* ------------------------------------------------------- price code */
 
-        var priceCodeStorageKey = 'customerPriceCode_' + customerId;
+        var priceCodeDropdown = document.getElementById('priceCodeDropdown');
 
         function updateAddButtonState() {
             addNewBtn.disabled = !priceCodeFilter.value.trim();
         }
 
+        function renderPriceCodeOptions(filterText) {
+            var term = (filterText || '').trim().toLowerCase();
+            var matches = priceCodes.filter(function (pc) {
+                return !term || pc.toLowerCase().indexOf(term) !== -1;
+            });
+            priceCodeDropdown.innerHTML = '';
+            if (!matches.length) {
+                var empty = document.createElement('p');
+                empty.className = 'px-3 py-2 text-sm text-slate-400';
+                empty.textContent = 'No matching price codes';
+                priceCodeDropdown.appendChild(empty);
+                return;
+            }
+            matches.forEach(function (pc) {
+                var opt = document.createElement('button');
+                opt.type = 'button';
+                opt.className = 'block w-full truncate px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700';
+                opt.textContent = pc;
+                opt.addEventListener('click', function () {
+                    priceCodeFilter.value = pc;
+                    updateAddButtonState();
+                    applyFilters();
+                });
+                priceCodeDropdown.appendChild(opt);
+            });
+        }
+
         priceCodeFilter.addEventListener('input', function () {
-            try {
-                sessionStorage.setItem(priceCodeStorageKey, priceCodeFilter.value.trim());
-            } catch (e) { /* storage unavailable - filter just won't persist */ }
             updateAddButtonState();
             applyFilters();
+            renderPriceCodeOptions(priceCodeFilter.value);
+            priceCodeDropdown.classList.remove('hidden');
         });
 
-        try {
-            var storedPriceCode = sessionStorage.getItem(priceCodeStorageKey);
-            if (storedPriceCode) priceCodeFilter.value = storedPriceCode;
-        } catch (e) { /* storage unavailable */ }
+        // Clicking/focusing the field always shows every price code (not just
+        // ones matching whatever is already typed) — the dropdown toggle
+        // itself (open/close) is handled by the site-wide [data-dropdown] logic.
+        priceCodeFilter.addEventListener('click', function () {
+            renderPriceCodeOptions('');
+        });
+
+        var justUsedPriceCode = new URLSearchParams(window.location.search).get('priceCode');
+        if (justUsedPriceCode) {
+            priceCodeFilter.value = justUsedPriceCode;
+        } else if (priceCodes.length === 1) {
+            priceCodeFilter.value = priceCodes[0];
+        } else if (priceCodes.length === 0) {
+            priceCodeFilter.value = 'REGULAR';
+        }
         updateAddButtonState();
 
         /* --------------------------------------------------- catalog search */
@@ -369,49 +408,41 @@
 
         var newPriceNote = document.getElementById('newPriceNote');
 
-        function openAdd() {
+        function openAddModal(row) {
             recordForm.reset();
             recordForm.action = addUrl;
-            var priceCode = priceCodeFilter.value.trim();
-            fieldPriceCode.value = priceCode;
             fieldEffectiveDate.value = todayIso();
-            fieldCatalog.value = '';
-            catalogSearch.readOnly = false;
-            newPriceNote.classList.add('hidden');
-            modalTitle.textContent = 'Add Product';
-            refreshCatalogOptions(priceCode, null);
-            refreshUnitOptions(null, null);
-            OS.openModal('recordModal');
-        }
+            document.getElementById('fieldPrice').value = '';
 
-        function openAddPriceForRow(row) {
-            var id = row.getAttribute('data-id');
-            var catalog = row.getAttribute('data-catalog');
-            recordForm.reset();
-            recordForm.action = addUrl;
+            var id = row ? row.getAttribute('data-id') : null;
+            var catalog = row ? row.getAttribute('data-catalog') : '';
+            var priceCode = row ? row.getAttribute('data-price-code') : priceCodeFilter.value.trim();
+
             fieldCatalog.value = catalog;
             catalogSearch.value = catalog;
-            catalogSearch.readOnly = true;
-            document.getElementById('fieldDescription').value = row.getAttribute('data-description');
-            document.getElementById('fieldCategory').value = row.getAttribute('data-category');
-            document.getElementById('fieldPrice').value = '';
-            fieldEffectiveDate.value = todayIso();
-            var priceCode = row.getAttribute('data-price-code');
+            catalogSearch.readOnly = !!row;
             fieldPriceCode.value = priceCode;
-            newPriceNote.classList.remove('hidden');
-            modalTitle.textContent = 'Add New Price — ' + catalog;
+            newPriceNote.classList.toggle('hidden', !row);
+            modalTitle.textContent = row ? 'Add New Price — ' + catalog : 'Add Product';
+
+            if (row) {
+                document.getElementById('fieldDescription').value = row.getAttribute('data-description');
+                document.getElementById('fieldCategory').value = row.getAttribute('data-category');
+            }
+
             refreshCatalogOptions(priceCode, id);
-            refreshUnitOptions(findInventoryItem(catalog), row.getAttribute('data-unit'));
+            refreshUnitOptions(row ? findInventoryItem(catalog) : null, row ? row.getAttribute('data-unit') : null);
             OS.openModal('recordModal');
+            window.setTimeout(function () { fieldEffectiveDate.focus(); }, 50);
         }
 
-        addNewBtn.addEventListener('click', openAdd);
+        addNewBtn.addEventListener('click', function () { openAddModal(null); });
 
         tbody.addEventListener('click', function (e) {
             var addPriceBtn = e.target.closest('.js-add-price');
             var delBtn = e.target.closest('.js-delete');
 
-            if (addPriceBtn) openAddPriceForRow(addPriceBtn.closest('tr'));
+            if (addPriceBtn) openAddModal(addPriceBtn.closest('tr'));
 
             if (delBtn) {
                 var row = delBtn.closest('tr');
