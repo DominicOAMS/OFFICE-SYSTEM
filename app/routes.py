@@ -4,7 +4,7 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, s
 from pymysql.err import IntegrityError
 from werkzeug.security import check_password_hash
 
-from . import customers_repo, program_menu_repo, users_repo
+from . import customers_repo, program_menu_repo, suppliers_repo, users_repo
 from .nav import flatten_slugs
 from .security import DEFAULT_PASSWORD, PASSWORD_REQUIREMENTS, is_valid_password
 
@@ -228,6 +228,203 @@ def customer_products_delete(customer_id, product_id):
     customers_repo.soft_delete_product(product_id, updated_by=session.get("user_id"))
     flash("Product deleted.", "success")
     return redirect(url_for("main.customer_products", customer_id=customer_id))
+
+
+def _parse_supplier_form():
+    return {
+        "code": request.form.get("code", "").strip(),
+        "name": request.form.get("name", "").strip(),
+        "category": request.form.get("category", "").strip() or None,
+        "status": "Inactive" if request.form.get("status") == "Inactive" else "Active",
+        "address": request.form.get("address", "").strip() or None,
+        "telephoneNumber": request.form.get("telephoneNumber", "").strip() or None,
+        "faxNumber": request.form.get("faxNumber", "").strip() or None,
+        "email": request.form.get("email", "").strip() or None,
+        "paymentTerm": request.form.get("paymentTerm", "").strip() or None,
+        "tin": request.form.get("tin", "").strip() or None,
+        "priceType": request.form.get("priceType", "").strip() or "Regular",
+    }
+
+
+@main_bp.route("/page/parameters_suppliers")
+@login_required
+def suppliers():
+    records = suppliers_repo.list_active_suppliers()
+    categories = suppliers_repo.list_distinct_categories()
+    price_types = suppliers_repo.list_distinct_price_types()
+    payment_terms = suppliers_repo.list_distinct_payment_terms()
+    return render_template(
+        "suppliers.html",
+        suppliers=records,
+        categories=categories,
+        price_types=price_types,
+        payment_terms=payment_terms,
+    )
+
+
+@main_bp.route("/page/parameters_suppliers/add", methods=["POST"])
+@login_required
+def suppliers_add():
+    data = _parse_supplier_form()
+    if not data["code"] or not data["name"]:
+        flash("Supplier code and name are required.", "error")
+        return redirect(url_for("main.suppliers"))
+
+    try:
+        suppliers_repo.create_supplier(data, created_by=session.get("user_id"))
+    except IntegrityError:
+        flash(f'Supplier code "{data["code"]}" is already in use.', "error")
+        return redirect(url_for("main.suppliers"))
+
+    flash(f'Supplier "{data["name"]}" created.', "success")
+    return redirect(url_for("main.suppliers"))
+
+
+@main_bp.route("/page/parameters_suppliers/<int:supplier_id>/edit", methods=["POST"])
+@login_required
+def suppliers_edit(supplier_id):
+    data = _parse_supplier_form()
+    if not data["code"] or not data["name"]:
+        flash("Supplier code and name are required.", "error")
+        return redirect(url_for("main.suppliers"))
+
+    try:
+        suppliers_repo.update_supplier(supplier_id, data, updated_by=session.get("user_id"))
+    except IntegrityError:
+        flash(f'Supplier code "{data["code"]}" is already in use.', "error")
+        return redirect(url_for("main.suppliers"))
+
+    flash(f'Supplier "{data["name"]}" updated.', "success")
+    return redirect(url_for("main.suppliers"))
+
+
+@main_bp.route("/page/parameters_suppliers/<int:supplier_id>/delete", methods=["POST"])
+@login_required
+def suppliers_delete(supplier_id):
+    suppliers_repo.soft_delete_supplier(supplier_id, updated_by=session.get("user_id"))
+    flash("Supplier deleted.", "success")
+    return redirect(url_for("main.suppliers"))
+
+
+def _parse_supplier_product_form():
+    price = request.form.get("price", "").strip()
+    effective_date = request.form.get("effectiveDate", "").strip()
+    return {
+        "catalog": request.form.get("catalog", "").strip(),
+        "description": request.form.get("description", "").strip() or None,
+        "category": request.form.get("category", "").strip() or None,
+        "unit": request.form.get("unit", "").strip() or None,
+        "price": price or None,
+        "priceCode": request.form.get("priceCode", "").strip() or None,
+        "effectiveDate": effective_date or None,
+    }
+
+
+SUPPLIER_PRODUCTS_PER_PAGE = 50
+
+
+@main_bp.route("/page/parameters_suppliers/<int:supplier_id>/products")
+@login_required
+def supplier_products(supplier_id):
+    supplier = suppliers_repo.get_supplier(supplier_id)
+    if not supplier:
+        abort(404)
+
+    search = request.args.get("q", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    total = suppliers_repo.count_products_for_supplier(supplier_id, search or None)
+    page_count = max(1, -(-total // SUPPLIER_PRODUCTS_PER_PAGE))  # ceil
+    page = min(page, page_count)
+
+    products = suppliers_repo.list_products_for_supplier(
+        supplier_id,
+        search=search or None,
+        limit=SUPPLIER_PRODUCTS_PER_PAGE,
+        offset=(page - 1) * SUPPLIER_PRODUCTS_PER_PAGE,
+    )
+    return render_template(
+        "supplier_products.html",
+        supplier=supplier,
+        products=products,
+        units=suppliers_repo.list_allowed_units(),
+        price_codes=suppliers_repo.list_price_codes_for_supplier(supplier_id),
+        catalog_suggestions=suppliers_repo.list_catalog_suggestions(supplier_id),
+        product_categories=suppliers_repo.list_distinct_product_categories(),
+        search=search,
+        page=page,
+        page_count=page_count,
+        total=total,
+        per_page=SUPPLIER_PRODUCTS_PER_PAGE,
+    )
+
+
+@main_bp.route("/page/parameters_suppliers/<int:supplier_id>/products/add", methods=["POST"])
+@login_required
+def supplier_products_add(supplier_id):
+    data = _parse_supplier_product_form()
+    if not data["catalog"] or not data["price"]:
+        flash("Catalog and price are required.", "error")
+        return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+    if suppliers_repo.product_price_exists(supplier_id, data):
+        flash(
+            "That exact price (same catalog, price code, unit, price and effective date) is already on file.",
+            "error",
+        )
+        return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+
+    suppliers_repo.create_product(supplier_id, data, created_by=session.get("user_id"))
+    flash(f'Price for "{data["catalog"]}" added.', "success")
+    return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+
+
+@main_bp.route("/page/parameters_suppliers/<int:supplier_id>/products/<int:product_id>/edit", methods=["POST"])
+@login_required
+def supplier_products_edit(supplier_id, product_id):
+    product = suppliers_repo.get_product(product_id)
+    if not product or product["supplierId"] != supplier_id:
+        abort(404)
+
+    data = _parse_supplier_product_form()
+    if not data["catalog"] or not data["price"]:
+        flash("Catalog and price are required.", "error")
+        return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+    if suppliers_repo.product_price_exists(supplier_id, data, exclude_id=product_id):
+        flash(
+            "Another row already has that exact catalog, price code, unit, price and effective date.",
+            "error",
+        )
+        return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+
+    suppliers_repo.update_product(product_id, data, updated_by=session.get("user_id"))
+    flash(f'Price for "{data["catalog"]}" updated.', "success")
+    return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+
+
+@main_bp.route("/page/parameters_suppliers/<int:supplier_id>/products/<int:product_id>/delete", methods=["POST"])
+@login_required
+def supplier_products_delete(supplier_id, product_id):
+    suppliers_repo.soft_delete_product(product_id, updated_by=session.get("user_id"))
+    flash("Price removed.", "success")
+    return redirect(url_for("main.supplier_products", supplier_id=supplier_id))
+
+
+@main_bp.route("/page/parameters_suppliers/<int:supplier_id>/products/history")
+@login_required
+def supplier_product_history(supplier_id):
+    """Price history for one catalog line, rendered into the history modal."""
+    if not suppliers_repo.get_supplier(supplier_id):
+        abort(404)
+    rows = suppliers_repo.list_price_history(
+        supplier_id,
+        request.args.get("catalog") or None,
+        request.args.get("priceCode") or None,
+        request.args.get("unit") or None,
+    )
+    return render_template("_price_history.html", rows=rows)
 
 
 @main_bp.route("/page/parameters_users")

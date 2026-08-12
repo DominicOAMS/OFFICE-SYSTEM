@@ -1,0 +1,408 @@
+{% extends "base.html" %}
+
+{% block title %}Suppliers - Office System{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="truck" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Suppliers</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    Supplier master list and their product price lists.
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Add New
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <!-- Status filter -->
+            <div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-800"
+                 id="statusFilter" role="group" aria-label="Filter by status">
+                {% for key, label in [('all', 'All'), ('Active', 'Active'), ('Inactive', 'Inactive')] %}
+                <button type="button" data-filter="{{ key }}"
+                        class="rounded-md px-3 py-1.5 text-sm font-medium transition
+                               {% if key == 'all' %}bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white active
+                               {% else %}text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200{% endif %}">
+                    {{ label }}
+                </button>
+                {% endfor %}
+            </div>
+
+            <div class="flex items-center gap-2">
+                <div class="relative">
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" id="supplierSearch" placeholder="Search code, name, email, terms…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </div>
+                <span class="badge badge-slate whitespace-nowrap"><span id="supplierCount">{{ suppliers|length }}</span> shown</span>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            {# table-fixed so long supplier names truncate instead of pushing
+               Products/Actions off the right edge #}
+            <table class="w-full min-w-[48rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th">Supplier</th>
+                        <th class="table-th w-24">Category</th>
+                        <th class="table-th w-28">Price Type</th>
+                        <th class="table-th w-36">Terms</th>
+                        <th class="table-th w-24">Status</th>
+                        <th class="table-th w-24">Products</th>
+                        <th class="table-th w-28 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for s in suppliers %}
+                    <tr class="table-row"
+                        data-id="{{ s.id }}"
+                        data-code="{{ s.code or '' }}"
+                        data-name="{{ s.name or '' }}"
+                        data-category="{{ s.category or '' }}"
+                        data-status="{{ s.status or 'Active' }}"
+                        data-address="{{ s.address or '' }}"
+                        data-telephone-number="{{ s.telephoneNumber or '' }}"
+                        data-fax-number="{{ s.faxNumber or '' }}"
+                        data-email="{{ s.email or '' }}"
+                        data-payment-term="{{ s.paymentTerm or '' }}"
+                        data-tin="{{ s.tin or '' }}"
+                        data-price-type="{{ s.priceType or 'Regular' }}">
+                        <td class="table-td">
+                            <div class="min-w-0">
+                                <p class="truncate font-medium text-slate-900 dark:text-white">{{ s.name }}</p>
+                                <p class="truncate font-mono text-xs text-slate-500 dark:text-slate-400">{{ s.code }}</p>
+                            </div>
+                        </td>
+                        <td class="table-td">
+                            {% if s.category %}
+                                <span class="badge badge-slate">{{ s.category }}</span>
+                            {% else %}
+                                <span class="text-slate-300 dark:text-slate-600">&mdash;</span>
+                            {% endif %}
+                        </td>
+                        <td class="table-td">
+                            <span class="badge {{ 'badge-accent' if s.priceType == 'Government' else ('badge-warning' if s.priceType == 'Special' else 'badge-slate') }}">
+                                {{ s.priceType }}
+                            </span>
+                        </td>
+                        <td class="table-td">
+                            {% if s.paymentTerm %}
+                                <span class="flex items-center gap-1.5 text-xs">
+                                    <i data-lucide="calendar-clock" class="h-3 w-3 shrink-0 text-slate-400"></i>
+                                    <span class="truncate">{{ s.paymentTerm }}</span>
+                                </span>
+                            {% else %}
+                                <span class="text-slate-300 dark:text-slate-600">&mdash;</span>
+                            {% endif %}
+                        </td>
+                        <td class="table-td">
+                            <span class="badge {{ 'badge-success' if s.status == 'Active' else 'badge-slate' }}">
+                                {{ s.status }}
+                            </span>
+                        </td>
+                        <td class="table-td">
+                            <a href="{{ url_for('main.supplier_products', supplier_id=s.id) }}"
+                               class="badge badge-brand hover:ring-2 hover:ring-brand-600/30">
+                                <i data-lucide="package" class="h-3 w-3"></i>{{ s.productCount }}
+                            </a>
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <a href="{{ url_for('main.supplier_products', supplier_id=s.id) }}"
+                                   class="btn btn-icon btn-ghost" title="Product price list" aria-label="Product price list">
+                                    <i data-lucide="package-search" class="h-4 w-4"></i>
+                                </a>
+                                <button type="button" class="btn btn-icon btn-ghost js-edit" title="Edit" aria-label="Edit supplier">
+                                    <i data-lucide="pencil" class="h-4 w-4"></i>
+                                </button>
+                                <button type="button"
+                                        class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-delete"
+                                        title="Delete" aria-label="Delete supplier">
+                                    <i data-lucide="trash-2" class="h-4 w-4"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="truck" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No suppliers yet</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div id="noSearchResults" class="hidden px-5 py-14 text-center">
+            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                <i data-lucide="search-x" class="h-6 w-6"></i>
+            </span>
+            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No suppliers match your filters</p>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Add / Edit supplier modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-3xl">
+        <form id="recordForm" method="POST" action="{{ url_for('main.suppliers_add') }}">
+            <div class="modal-header">
+                <h3 class="modal-title" id="recordModalTitle">Add New Supplier</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-5">
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                        <label class="label" for="fieldCode">Code <span class="text-accent-600">*</span></label>
+                        <input type="text" class="input font-mono" id="fieldCode" name="code" required
+                               maxlength="20" placeholder="e.g. 0016A">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="label" for="fieldName">Name <span class="text-accent-600">*</span></label>
+                        <input type="text" class="input" id="fieldName" name="name" required>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldStatus">Status</label>
+                        <select class="input" id="fieldStatus" name="status">
+                            <option value="Active">Active</option>
+                            <option value="Inactive">Inactive</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldCategory">Category</label>
+                        <input type="text" class="input" id="fieldCategory" name="category"
+                               list="categoryOptions" autocomplete="off" placeholder="e.g. OP">
+                        <datalist id="categoryOptions">
+                            {% for c in categories %}<option value="{{ c }}"></option>{% endfor %}
+                        </datalist>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldPriceType">Price Type</label>
+                        <input type="text" class="input" id="fieldPriceType" name="priceType"
+                               list="priceTypeOptions" autocomplete="off" placeholder="Regular">
+                        <datalist id="priceTypeOptions">
+                            {% for p in price_types %}<option value="{{ p }}"></option>{% endfor %}
+                        </datalist>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldPaymentTerm">Payment Term</label>
+                        <input type="text" class="input" id="fieldPaymentTerm" name="paymentTerm"
+                               list="paymentTermOptions" autocomplete="off" placeholder="e.g. 30 days">
+                        <datalist id="paymentTermOptions">
+                            {% for t in payment_terms %}<option value="{{ t }}"></option>{% endfor %}
+                        </datalist>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldTin">TIN</label>
+                        <input type="text" class="input" id="fieldTin" name="tin">
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
+                    <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Contact details
+                    </p>
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <div>
+                            <label class="label" for="fieldTelephoneNumber">Telephone</label>
+                            <input type="text" class="input" id="fieldTelephoneNumber" name="telephoneNumber">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldFaxNumber">Fax</label>
+                            <input type="text" class="input" id="fieldFaxNumber" name="faxNumber">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldEmail">Email</label>
+                            <input type="email" class="input" id="fieldEmail" name="email">
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <label class="label" for="fieldAddress">Address</label>
+                        <textarea class="input" id="fieldAddress" name="address" rows="2"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i data-lucide="check" class="h-4 w-4"></i>Save
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== Delete confirm modal ===================== -->
+<div id="deleteConfirmModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="deleteForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title">Delete supplier</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="px-5 py-5">
+                <div class="flex items-start gap-3">
+                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+                        <i data-lucide="triangle-alert" class="h-5 w-5"></i>
+                    </span>
+                    <div>
+                        <p class="text-sm font-medium text-slate-900 dark:text-white">
+                            Delete <span id="deleteTargetName">this supplier</span>?
+                        </p>
+                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                            Their price list stays on record but will no longer be shown.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-danger">
+                    <i data-lucide="trash-2" class="h-4 w-4"></i>Delete
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var recordForm = document.getElementById('recordForm');
+        var deleteForm = document.getElementById('deleteForm');
+        var modalTitle = document.getElementById('recordModalTitle');
+        var tbody = document.getElementById('recordsBody');
+        var addUrl = "{{ url_for('main.suppliers_add') }}";
+
+        var ACTIVE_CLASSES = ['bg-white', 'text-slate-900', 'shadow-sm', 'dark:bg-slate-700', 'dark:text-white', 'active'];
+        var IDLE_CLASSES = ['text-slate-500', 'hover:text-slate-800', 'dark:text-slate-400', 'dark:hover:text-slate-200'];
+
+        function editUrl(id) { return '/page/parameters_suppliers/' + id + '/edit'; }
+        function deleteUrl(id) { return '/page/parameters_suppliers/' + id + '/delete'; }
+
+        function setField(id, value) { document.getElementById(id).value = value || ''; }
+
+        function openAdd() {
+            recordForm.reset();
+            recordForm.action = addUrl;
+            setField('fieldStatus', 'Active');
+            setField('fieldPriceType', 'Regular');
+            modalTitle.textContent = 'Add New Supplier';
+            OS.openModal('recordModal');
+        }
+
+        function openEdit(row) {
+            recordForm.action = editUrl(row.getAttribute('data-id'));
+            setField('fieldCode', row.getAttribute('data-code'));
+            setField('fieldName', row.getAttribute('data-name'));
+            setField('fieldCategory', row.getAttribute('data-category'));
+            setField('fieldStatus', row.getAttribute('data-status') || 'Active');
+            setField('fieldAddress', row.getAttribute('data-address'));
+            setField('fieldTelephoneNumber', row.getAttribute('data-telephone-number'));
+            setField('fieldFaxNumber', row.getAttribute('data-fax-number'));
+            setField('fieldEmail', row.getAttribute('data-email'));
+            setField('fieldPaymentTerm', row.getAttribute('data-payment-term'));
+            setField('fieldTin', row.getAttribute('data-tin'));
+            setField('fieldPriceType', row.getAttribute('data-price-type') || 'Regular');
+            modalTitle.textContent = 'Edit Supplier';
+            OS.openModal('recordModal');
+        }
+
+        document.getElementById('addNewBtn').addEventListener('click', openAdd);
+
+        tbody.addEventListener('click', function (e) {
+            var editBtn = e.target.closest('.js-edit');
+            var delBtn = e.target.closest('.js-delete');
+
+            if (editBtn) openEdit(editBtn.closest('tr'));
+
+            if (delBtn) {
+                var row = delBtn.closest('tr');
+                deleteForm.action = deleteUrl(row.getAttribute('data-id'));
+                document.getElementById('deleteTargetName').textContent =
+                    row.getAttribute('data-name') || 'this supplier';
+                OS.openModal('deleteConfirmModal');
+            }
+        });
+
+        /* -------------------------------------------------- search + filter */
+
+        var search = document.getElementById('supplierSearch');
+        var noResults = document.getElementById('noSearchResults');
+        var filterButtons = document.querySelectorAll('#statusFilter [data-filter]');
+
+        function currentStatusFilter() {
+            var active = document.querySelector('#statusFilter .active');
+            return active ? active.getAttribute('data-filter') : 'all';
+        }
+
+        function applyFilters() {
+            var term = search.value.trim().toLowerCase();
+            var status = currentStatusFilter();
+            var shown = 0;
+
+            tbody.querySelectorAll('tr[data-id]').forEach(function (row) {
+                var haystack = (
+                    (row.getAttribute('data-code') || '') + ' ' +
+                    (row.getAttribute('data-name') || '') + ' ' +
+                    (row.getAttribute('data-email') || '') + ' ' +
+                    (row.getAttribute('data-category') || '') + ' ' +
+                    (row.getAttribute('data-payment-term') || '')
+                ).toLowerCase();
+
+                var matchesTerm = !term || haystack.indexOf(term) !== -1;
+                var matchesStatus = status === 'all' || row.getAttribute('data-status') === status;
+                var show = matchesTerm && matchesStatus;
+
+                row.classList.toggle('hidden', !show);
+                if (show) shown++;
+            });
+
+            document.getElementById('supplierCount').textContent = shown;
+            noResults.classList.toggle('hidden', shown > 0);
+        }
+
+        search.addEventListener('input', applyFilters);
+
+        filterButtons.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                filterButtons.forEach(function (b) {
+                    b.classList.remove.apply(b.classList, ACTIVE_CLASSES);
+                    b.classList.add.apply(b.classList, IDLE_CLASSES);
+                });
+                btn.classList.remove.apply(btn.classList, IDLE_CLASSES);
+                btn.classList.add.apply(btn.classList, ACTIVE_CLASSES);
+                applyFilters();
+            });
+        });
+
+        applyFilters();
+    })();
+</script>
+{% endblock %}

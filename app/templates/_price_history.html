@@ -1,0 +1,35 @@
+{# Rendered into the price-history modal on the supplier products page. #}
+{% if rows %}
+    <ul class="space-y-2">
+        {% for r in rows %}
+        <li class="flex items-start gap-3 rounded-lg border px-3 py-2.5
+                   {% if loop.first %}border-brand-200 bg-brand-50/60 dark:border-brand-500/30 dark:bg-brand-500/10
+                   {% else %}border-slate-200 dark:border-slate-700{% endif %}">
+            <span class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full
+                         {% if loop.first %}bg-brand-600 text-white
+                         {% else %}bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400{% endif %}">
+                <i data-lucide="{{ 'badge-check' if loop.first else 'history' }}" class="h-3.5 w-3.5"></i>
+            </span>
+            <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-baseline justify-between gap-x-3">
+                    <span class="font-semibold tabular-nums text-slate-900 dark:text-white">
+                        {% if r.price is not none %}₱{{ '{:,.2f}'.format(r.price) }}{% else %}&mdash;{% endif %}
+                    </span>
+                    {% if loop.first %}
+                        <span class="badge badge-brand">Current</span>
+                    {% else %}
+                        <span class="text-xs text-slate-400 dark:text-slate-500">Superseded</span>
+                    {% endif %}
+                </div>
+                <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    Effective {{ r.effectiveDate.strftime('%d %b %Y') if r.effectiveDate else '—' }}
+                    {%- if r.createdByName %} · added by {{ r.createdByName }}{% endif %}
+                    {%- if r.createdAt %} · {{ r.createdAt.strftime('%d %b %Y') }}{% endif %}
+                </p>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+{% else %}
+    <p class="py-6 text-center text-sm text-slate-500 dark:text-slate-400">No price history found.</p>
+{% endif %}

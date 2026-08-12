@@ -1,0 +1,598 @@
+{% extends "base.html" %}
+
+{% block title %}{{ supplier.name }} - Price List - Office System{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Breadcrumb -->
+    <nav class="mb-4 flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
+        <a href="{{ url_for('main.suppliers') }}" class="hover:text-brand-600 dark:hover:text-brand-400">Suppliers</a>
+        <i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+        <span class="truncate font-medium text-slate-700 dark:text-slate-200">{{ supplier.name }}</span>
+    </nav>
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <a href="{{ url_for('main.suppliers') }}"
+               class="btn btn-icon btn-secondary mt-0.5" title="Back to suppliers" aria-label="Back to suppliers">
+                <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            </a>
+            <div class="min-w-0">
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">{{ supplier.name }}</h1>
+                <div class="mt-1 flex flex-wrap items-center gap-2">
+                    <span class="badge badge-slate font-mono">{{ supplier.code }}</span>
+                    <span class="badge {{ 'badge-success' if supplier.status == 'Active' else 'badge-slate' }}">{{ supplier.status }}</span>
+                    <span class="badge {{ 'badge-accent' if supplier.priceType == 'Government' else ('badge-warning' if supplier.priceType == 'Special' else 'badge-slate') }}">
+                        {{ supplier.priceType }}
+                    </span>
+                    {% if supplier.paymentTerm %}
+                        <span class="text-xs text-slate-500 dark:text-slate-400">
+                            <i data-lucide="calendar-clock" class="mr-1 inline h-3 w-3"></i>{{ supplier.paymentTerm }}
+                        </span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Add Price
+        </button>
+    </div>
+
+    <!-- Explainer -->
+    <div class="mb-5 flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3
+                dark:border-sky-500/30 dark:bg-sky-500/10">
+        <i data-lucide="info" class="mt-0.5 h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400"></i>
+        <p class="text-sm text-sky-800 dark:text-sky-300">
+            This shows the <span class="font-medium">current</span> price for each catalog line — the newest
+            price whose effective date has arrived. Adding a new price supersedes the old one without deleting it;
+            use the history icon to see every price ever recorded.
+        </p>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="package" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Price List
+            </h2>
+            <div class="flex items-center gap-2">
+                <form method="GET" action="{{ url_for('main.supplier_products', supplier_id=supplier.id) }}"
+                      class="relative" id="searchForm">
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" id="productSearch" value="{{ search }}"
+                           placeholder="Search catalog, description…"
+                           class="input w-64 py-1.5 pl-9 pr-8 text-sm">
+                    {% if search %}
+                        <a href="{{ url_for('main.supplier_products', supplier_id=supplier.id) }}"
+                           class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-slate-600
+                                  dark:hover:text-slate-200" title="Clear search" aria-label="Clear search">
+                            <i data-lucide="x" class="h-3.5 w-3.5"></i>
+                        </a>
+                    {% endif %}
+                </form>
+                <span class="badge badge-slate whitespace-nowrap">{{ '{:,}'.format(total) }} items</span>
+            </div>
+        </div>
+
+        {% if search %}
+        <div class="border-b border-slate-200 bg-slate-50 px-5 py-2.5 text-sm text-slate-600
+                    dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-300">
+            <i data-lucide="filter" class="mr-1 inline h-3.5 w-3.5"></i>
+            Showing results for <span class="font-medium">"{{ search }}"</span>
+            &mdash; <a href="{{ url_for('main.supplier_products', supplier_id=supplier.id) }}"
+                       class="text-brand-600 hover:underline dark:text-brand-400">clear</a>
+        </div>
+        {% endif %}
+
+        <div class="overflow-x-auto">
+            {# table-fixed so long descriptions truncate instead of pushing the
+               Actions column past the right edge #}
+            <table class="w-full min-w-[58rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th w-32">Catalog</th>
+                        <th class="table-th">Description</th>
+                        <th class="table-th w-24">Category</th>
+                        <th class="table-th w-28">Price Code</th>
+                        <th class="table-th w-20">Unit</th>
+                        <th class="table-th w-28 text-right">Price</th>
+                        <th class="table-th w-28">Effective</th>
+                        <th class="table-th w-36 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for p in products %}
+                    <tr class="table-row"
+                        data-id="{{ p.id }}"
+                        data-catalog="{{ p.catalog or '' }}"
+                        data-description="{{ p.description or '' }}"
+                        data-category="{{ p.category or '' }}"
+                        data-price-code="{{ p.priceCode or '' }}"
+                        data-unit="{{ p.unit or '' }}"
+                        data-price="{{ p.price if p.price is not none else '' }}"
+                        data-effective-date="{{ p.effectiveDate.strftime('%Y-%m-%d') if p.effectiveDate else '' }}"
+                        data-versions="{{ p.versionCount }}">
+                        <td class="table-td font-mono text-xs font-medium text-slate-900 dark:text-white">
+                            {{ p.catalog or '—' }}
+                        </td>
+                        <td class="table-td">
+                            <span class="line-clamp-2">{{ p.description or '—' }}</span>
+                        </td>
+                        <td class="table-td">
+                            {% if p.category %}
+                                <span class="badge badge-slate">{{ p.category }}</span>
+                            {% else %}
+                                <span class="text-slate-300 dark:text-slate-600">&mdash;</span>
+                            {% endif %}
+                        </td>
+                        <td class="table-td">
+                            {% if p.priceCode %}
+                                <span class="badge badge-slate">{{ p.priceCode }}</span>
+                            {% else %}
+                                <span class="text-slate-300 dark:text-slate-600">&mdash;</span>
+                            {% endif %}
+                        </td>
+                        <td class="table-td">{{ p.unit or '—' }}</td>
+                        <td class="table-td text-right font-semibold tabular-nums
+                                   {{ 'text-rose-600 dark:text-rose-400' if p.price is not none and p.price < 0 }}">
+                            {% if p.price is not none %}₱{{ '{:,.2f}'.format(p.price) }}{% else %}<span class="font-normal text-slate-300 dark:text-slate-600">&mdash;</span>{% endif %}
+                        </td>
+                        <td class="table-td whitespace-nowrap text-xs">
+                            {{ p.effectiveDate.strftime('%d %b %Y') if p.effectiveDate else '—' }}
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-history relative"
+                                        title="Price history" aria-label="Price history">
+                                    <i data-lucide="history" class="h-4 w-4"></i>
+                                    {% if p.versionCount > 1 %}
+                                        <span class="absolute -right-0.5 -top-0.5 grid h-4 min-w-[1rem] place-items-center
+                                                     rounded-full bg-brand-600 px-1 text-[10px] font-semibold text-white">
+                                            {{ p.versionCount }}
+                                        </span>
+                                    {% endif %}
+                                </button>
+                                <button type="button" class="btn btn-icon btn-ghost js-new-price"
+                                        title="Add newer price (keeps this one as history)"
+                                        aria-label="Add newer price">
+                                    <i data-lucide="trending-up" class="h-4 w-4"></i>
+                                </button>
+                                <button type="button" class="btn btn-icon btn-ghost js-edit"
+                                        title="Edit this row (correct a mistake)" aria-label="Edit price">
+                                    <i data-lucide="pencil" class="h-4 w-4"></i>
+                                </button>
+                                <button type="button"
+                                        class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-delete"
+                                        title="Delete" aria-label="Delete price">
+                                    <i data-lucide="trash-2" class="h-4 w-4"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="{{ 'search-x' if search else 'package-x' }}" class="h-6 w-6"></i>
+                            </span>
+                            {% if search %}
+                                <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No items match "{{ search }}"</p>
+                                <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                    <a href="{{ url_for('main.supplier_products', supplier_id=supplier.id) }}"
+                                       class="text-brand-600 hover:underline dark:text-brand-400">Clear the search</a>
+                                    to see all prices.
+                                </p>
+                            {% else %}
+                                <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No prices recorded</p>
+                                <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                                    Add the first price for this supplier.
+                                </p>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if page_count > 1 %}
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3
+                    dark:border-slate-800">
+            <p class="text-sm text-slate-500 dark:text-slate-400">
+                Showing <span class="font-medium text-slate-700 dark:text-slate-200">{{ ((page - 1) * per_page) + 1 }}</span>–<span
+                    class="font-medium text-slate-700 dark:text-slate-200">{{ [page * per_page, total]|min }}</span>
+                of <span class="font-medium text-slate-700 dark:text-slate-200">{{ '{:,}'.format(total) }}</span>
+            </p>
+
+            {% macro page_url(p) -%}
+                {{ url_for('main.supplier_products', supplier_id=supplier.id, page=p, q=search or None) }}
+            {%- endmacro %}
+
+            <nav class="flex items-center gap-1" aria-label="Pagination">
+                {% if page > 1 %}
+                    <a href="{{ page_url(page - 1) }}" class="btn btn-secondary btn-sm" aria-label="Previous page">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </span>
+                {% endif %}
+
+                {# window of page numbers around the current page #}
+                {% set win_start = [1, page - 2]|max %}
+                {% set win_end = [page_count, win_start + 4]|min %}
+                {% set win_start = [1, win_end - 4]|max %}
+
+                {% if win_start > 1 %}
+                    <a href="{{ page_url(1) }}" class="btn btn-secondary btn-sm">1</a>
+                    {% if win_start > 2 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                {% endif %}
+
+                {% for p in range(win_start, win_end + 1) %}
+                    {% if p == page %}
+                        <span class="btn btn-sm bg-accent-600 text-white shadow-sm">{{ p }}</span>
+                    {% else %}
+                        <a href="{{ page_url(p) }}" class="btn btn-secondary btn-sm">{{ p }}</a>
+                    {% endif %}
+                {% endfor %}
+
+                {% if win_end < page_count %}
+                    {% if win_end < page_count - 1 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                    <a href="{{ page_url(page_count) }}" class="btn btn-secondary btn-sm">{{ page_count }}</a>
+                {% endif %}
+
+                {% if page < page_count %}
+                    <a href="{{ page_url(page + 1) }}" class="btn btn-secondary btn-sm" aria-label="Next page">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </span>
+                {% endif %}
+            </nav>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ===================== Add price modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-2xl">
+        <form id="recordForm" method="POST"
+              action="{{ url_for('main.supplier_products_add', supplier_id=supplier.id) }}">
+            <div class="modal-header">
+                <h3 class="modal-title" id="recordModalTitle">Add Price</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-4">
+
+                <div id="supersedeNote"
+                     class="hidden items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3
+                            dark:border-amber-500/30 dark:bg-amber-500/10">
+                    <i data-lucide="trending-up" class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400"></i>
+                    <p class="text-sm text-amber-800 dark:text-amber-300">
+                        This will become the current price for
+                        <span class="font-semibold" id="supersedeCatalog"></span>,
+                        replacing <span class="font-semibold" id="supersedeOldPrice"></span>.
+                        The old price is kept as history.
+                    </p>
+                </div>
+
+                <div id="editNote"
+                     class="hidden items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3
+                            dark:border-sky-500/30 dark:bg-sky-500/10">
+                    <i data-lucide="pencil" class="mt-0.5 h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400"></i>
+                    <p class="text-sm text-sky-800 dark:text-sky-300">
+                        Editing corrects this row in place &mdash; it does <span class="font-semibold">not</span>
+                        create a history entry. If the supplier actually changed their price, cancel and use
+                        <span class="font-semibold">Add newer price</span> instead.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                        <label class="label" for="catalogInput">Catalog <span class="text-accent-600">*</span></label>
+                        <input type="text" class="input font-mono" id="catalogInput" name="catalog" required
+                               list="catalogOptions" autocomplete="off" placeholder="e.g. 6801234">
+                        <datalist id="catalogOptions">
+                            {% for c in catalog_suggestions %}
+                                <option value="{{ c.catalog }}">{{ c.description or '' }}</option>
+                            {% endfor %}
+                        </datalist>
+                        <p class="help">Pick an existing catalog or type a new one.</p>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldPriceCode">Price Code</label>
+                        <input type="text" class="input" id="fieldPriceCode" name="priceCode"
+                               list="priceCodeOptions" autocomplete="off" placeholder="Optional">
+                        <datalist id="priceCodeOptions">
+                            {% for pc in price_codes %}<option value="{{ pc }}"></option>{% endfor %}
+                        </datalist>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div class="sm:col-span-2">
+                        <label class="label" for="fieldDescription">Description</label>
+                        <input type="text" class="input" id="fieldDescription" name="description"
+                               placeholder="Product description">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldCategory">Category</label>
+                        <input type="text" class="input" id="fieldCategory" name="category"
+                               list="categoryOptions" autocomplete="off" placeholder="Optional">
+                        <datalist id="categoryOptions">
+                            {% for c in product_categories %}<option value="{{ c }}"></option>{% endfor %}
+                        </datalist>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div>
+                        <label class="label" for="fieldUnit">Unit</label>
+                        <input type="text" class="input" id="fieldUnit" name="unit"
+                               list="unitOptions" autocomplete="off" placeholder="e.g. BOX">
+                        <datalist id="unitOptions">
+                            {% for u in units %}<option value="{{ u }}"></option>{% endfor %}
+                        </datalist>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldPrice">Price <span class="text-accent-600">*</span></label>
+                        <div class="relative">
+                            <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">₱</span>
+                            <input type="number" step="0.01" class="input pl-7 tabular-nums" id="fieldPrice"
+                                   name="price" required placeholder="0.00">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldEffectiveDate">Effective Date <span class="text-accent-600">*</span></label>
+                        <input type="date" class="input" id="fieldEffectiveDate" name="effectiveDate" required>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i data-lucide="check" class="h-4 w-4"></i>Save
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== Price history modal ===================== -->
+<div id="historyModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <div class="min-w-0">
+                <h3 class="modal-title">Price history</h3>
+                <p class="mt-0.5 truncate font-mono text-xs text-slate-500 dark:text-slate-400" id="historySubtitle"></p>
+            </div>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body" id="historyBody">
+            <p class="py-6 text-center text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Delete confirm modal ===================== -->
+<div id="deleteConfirmModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="deleteForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title">Delete price</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="px-5 py-5">
+                <div class="flex items-start gap-3">
+                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+                        <i data-lucide="triangle-alert" class="h-5 w-5"></i>
+                    </span>
+                    <div>
+                        <p class="text-sm font-medium text-slate-900 dark:text-white">
+                            Delete the price for <span id="deleteTargetName" class="font-mono">this item</span>?
+                        </p>
+                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                            If an older price exists, it becomes current again.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-danger">
+                    <i data-lucide="trash-2" class="h-4 w-4"></i>Delete
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var supplierId = {{ supplier.id }};
+        var recordForm = document.getElementById('recordForm');
+        var deleteForm = document.getElementById('deleteForm');
+        var modalTitle = document.getElementById('recordModalTitle');
+        var tbody = document.getElementById('recordsBody');
+
+        var supersedeNote = document.getElementById('supersedeNote');
+        var editNote = document.getElementById('editNote');
+        var historyBody = document.getElementById('historyBody');
+        var historySubtitle = document.getElementById('historySubtitle');
+        var addUrl = "{{ url_for('main.supplier_products_add', supplier_id=supplier.id) }}";
+
+        function deleteUrl(id) {
+            return '/page/parameters_suppliers/' + supplierId + '/products/' + id + '/delete';
+        }
+
+        function editUrl(id) {
+            return '/page/parameters_suppliers/' + supplierId + '/products/' + id + '/edit';
+        }
+
+        function todayIso() {
+            var d = new Date();
+            return d.getFullYear() + '-' +
+                   String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                   String(d.getDate()).padStart(2, '0');
+        }
+
+        function peso(v) {
+            var n = parseFloat(v);
+            if (isNaN(n)) return '—';
+            return '₱' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function setField(id, value) { document.getElementById(id).value = value || ''; }
+
+        function showNote(el, show) {
+            el.classList.toggle('hidden', !show);
+            el.classList.toggle('flex', show);
+        }
+
+        function showSupersede(show) { showNote(supersedeNote, show); }
+        function showEditNote(show) { showNote(editNote, show); }
+
+        /* ------------------------------------------------------- add price */
+
+        function openAdd() {
+            recordForm.reset();
+            recordForm.action = addUrl;
+            showSupersede(false);
+            showEditNote(false);
+            setField('fieldEffectiveDate', todayIso());
+            modalTitle.textContent = 'Add Price';
+            document.getElementById('catalogInput').readOnly = false;
+            OS.openModal('recordModal');
+        }
+
+        /* ------------------------------------------------ edit an existing row */
+
+        function openEdit(row) {
+            recordForm.reset();
+            recordForm.action = editUrl(row.getAttribute('data-id'));
+            setField('catalogInput', row.getAttribute('data-catalog'));
+            setField('fieldDescription', row.getAttribute('data-description'));
+            setField('fieldCategory', row.getAttribute('data-category'));
+            setField('fieldPriceCode', row.getAttribute('data-price-code'));
+            setField('fieldUnit', row.getAttribute('data-unit'));
+            setField('fieldPrice', row.getAttribute('data-price'));
+            setField('fieldEffectiveDate', row.getAttribute('data-effective-date') || todayIso());
+
+            showSupersede(false);
+            showEditNote(true);
+            modalTitle.textContent = 'Edit Price';
+            document.getElementById('catalogInput').readOnly = false;
+            OS.openModal('recordModal');
+        }
+
+        // "Add newer price" from a row: pre-fills the line so only the new
+        // price and date need typing.
+        function openNewPriceFor(row) {
+            recordForm.reset();
+            recordForm.action = addUrl;
+            setField('catalogInput', row.getAttribute('data-catalog'));
+            setField('fieldDescription', row.getAttribute('data-description'));
+            setField('fieldCategory', row.getAttribute('data-category'));
+            setField('fieldPriceCode', row.getAttribute('data-price-code'));
+            setField('fieldUnit', row.getAttribute('data-unit'));
+            setField('fieldEffectiveDate', todayIso());
+            document.getElementById('fieldPrice').value = '';
+
+            document.getElementById('supersedeCatalog').textContent = row.getAttribute('data-catalog') || 'this item';
+            document.getElementById('supersedeOldPrice').textContent = peso(row.getAttribute('data-price'));
+            showSupersede(true);
+            showEditNote(false);
+
+            modalTitle.textContent = 'Add Newer Price';
+            document.getElementById('catalogInput').readOnly = true;
+            OS.openModal('recordModal');
+            window.setTimeout(function () { document.getElementById('fieldPrice').focus(); }, 60);
+        }
+
+        document.getElementById('addNewBtn').addEventListener('click', openAdd);
+
+        /* --------------------------------------------------------- history */
+
+        function openHistory(row) {
+            var catalog = row.getAttribute('data-catalog') || '';
+            var priceCode = row.getAttribute('data-price-code') || '';
+            var unit = row.getAttribute('data-unit') || '';
+
+            historySubtitle.textContent = catalog + (priceCode ? ' · ' + priceCode : '') + (unit ? ' · ' + unit : '');
+            historyBody.innerHTML = '<p class="py-6 text-center text-sm text-slate-500 dark:text-slate-400">Loading…</p>';
+            OS.openModal('historyModal');
+
+            var url = '/page/parameters_suppliers/' + supplierId + '/products/history'
+                    + '?catalog=' + encodeURIComponent(catalog)
+                    + '&priceCode=' + encodeURIComponent(priceCode)
+                    + '&unit=' + encodeURIComponent(unit);
+
+            fetch(url, { credentials: 'same-origin' })
+                .then(function (r) { return r.text(); })
+                .then(function (html) {
+                    historyBody.innerHTML = html;
+                    OS.refreshIcons();
+                })
+                .catch(function () {
+                    historyBody.innerHTML =
+                        '<p class="py-6 text-center text-sm text-rose-600 dark:text-rose-400">Could not load history.</p>';
+                });
+        }
+
+        /* ----------------------------------------------------- row actions */
+
+        tbody.addEventListener('click', function (e) {
+            var histBtn = e.target.closest('.js-history');
+            var newBtn = e.target.closest('.js-new-price');
+            var editBtn = e.target.closest('.js-edit');
+            var delBtn = e.target.closest('.js-delete');
+
+            if (histBtn) openHistory(histBtn.closest('tr'));
+            if (newBtn) openNewPriceFor(newBtn.closest('tr'));
+            if (editBtn) openEdit(editBtn.closest('tr'));
+
+            if (delBtn) {
+                var row = delBtn.closest('tr');
+                deleteForm.action = deleteUrl(row.getAttribute('data-id'));
+                document.getElementById('deleteTargetName').textContent =
+                    row.getAttribute('data-catalog') || 'this item';
+                OS.openModal('deleteConfirmModal');
+            }
+        });
+
+        /* ---------------------------------------------------------- search */
+        // Server-side (the biggest supplier carries ~1,500 lines, too many to
+        // ship to the browser). Submitting resets to page 1 because the form
+        // posts only `q`.
+
+        var searchInput = document.getElementById('productSearch');
+
+        // Native clear ("x" in the search box) should restore the full list.
+        searchInput.addEventListener('search', function () {
+            if (searchInput.value === '') document.getElementById('searchForm').submit();
+        });
+    })();
+</script>
+{% endblock %}
