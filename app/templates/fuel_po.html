@@ -280,7 +280,9 @@
                 <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                         <label class="label" for="fieldFuelType">Fuel Type</label>
-                        <input type="text" class="input" id="fieldFuelType" name="fuelType">
+                        <input type="text" class="input cursor-not-allowed bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400"
+                               id="fieldFuelType" name="fuelType" readonly tabindex="-1">
+                        <p class="help">Set automatically from the selected vehicle.</p>
                     </div>
                     <div>
                         <label class="label" for="fieldAmount">Amount (₱) <span class="text-accent-600">*</span></label>
@@ -484,9 +486,7 @@
 
         vehicleSelect.addEventListener('change', function () {
             var opt = vehicleSelect.options[vehicleSelect.selectedIndex];
-            if (opt && opt.getAttribute('data-fuel-type')) {
-                fuelTypeInput.value = opt.getAttribute('data-fuel-type');
-            }
+            fuelTypeInput.value = (opt && opt.getAttribute('data-fuel-type')) || '';
         });
 
         /* ------------------------------------------------- attachment preview */
