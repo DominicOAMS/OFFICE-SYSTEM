@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+
+{% block title %}Vehicles - Office System{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="car" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Vehicles</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    Company fleet and who each vehicle is allotted to.
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Add New
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="car" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Vehicles
+            </h2>
+
+            <div class="flex items-center gap-2">
+                <div class="relative">
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" id="vehicleSearch" placeholder="Search plate, model, assignee…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </div>
+                <span class="badge badge-slate whitespace-nowrap"><span id="vehicleCount">{{ vehicles|length }}</span> shown</span>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[40rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th">Plate Number</th>
+                        <th class="table-th">Model</th>
+                        <th class="table-th w-32">Fuel Type</th>
+                        <th class="table-th w-40">Assigned To</th>
+                        <th class="table-th w-24">Status</th>
+                        <th class="table-th w-28 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for v in vehicles %}
+                    <tr class="table-row"
+                        data-id="{{ v.id }}"
+                        data-plate-number="{{ v.plateNumber or '' }}"
+                        data-vehicle-model="{{ v.vehicleModel or '' }}"
+                        data-fuel-type="{{ v.fuelType or '' }}"
+                        data-assigned-user-id="{{ v.assignedUserId or '' }}"
+                        data-assigned-user-name="{{ v.assignedUserName or '' }}"
+                        data-status="{{ v.status or 'Active' }}">
+                        <td class="table-td">
+                            <p class="truncate font-mono text-sm font-medium text-slate-900 dark:text-white">{{ v.plateNumber }}</p>
+                        </td>
+                        <td class="table-td">
+                            <p class="truncate text-slate-700 dark:text-slate-300">{{ v.vehicleModel or '—' }}</p>
+                        </td>
+                        <td class="table-td">
+                            {% if v.fuelType %}
+                                <span class="badge badge-slate">{{ v.fuelType }}</span>
+                            {% else %}
+                                <span class="text-slate-300 dark:text-slate-600">&mdash;</span>
+                            {% endif %}
+                        </td>
+                        <td class="table-td">
+                            {% if v.assignedUserName %}
+                                <span class="truncate">{{ v.assignedUserName }}</span>
+                            {% else %}
+                                <span class="text-slate-300 dark:text-slate-600">Pool vehicle</span>
+                            {% endif %}
+                        </td>
+                        <td class="table-td">
+                            <span class="badge {{ 'badge-success' if v.status == 'Active' else 'badge-slate' }}">{{ v.status }}</span>
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-edit" title="Edit" aria-label="Edit vehicle">
+                                    <i data-lucide="pencil" class="h-4 w-4"></i>
+                                </button>
+                                <button type="button"
+                                        class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-delete"
+                                        title="Delete" aria-label="Delete vehicle">
+                                    <i data-lucide="trash-2" class="h-4 w-4"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="car" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No vehicles yet</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div id="noSearchResults" class="hidden px-5 py-14 text-center">
+            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                <i data-lucide="search-x" class="h-6 w-6"></i>
+            </span>
+            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No vehicles match your filters</p>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Add / Edit vehicle modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <form id="recordForm" method="POST" action="{{ url_for('main.vehicles_add') }}">
+            <div class="modal-header">
+                <h3 class="modal-title" id="recordModalTitle">Add New Vehicle</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-4">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                        <label class="label" for="fieldPlateNumber">Plate Number <span class="text-accent-600">*</span></label>
+                        <input type="text" class="input font-mono" id="fieldPlateNumber" name="plateNumber" required maxlength="20">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldStatus">Status</label>
+                        <select class="input" id="fieldStatus" name="status">
+                            <option value="Active">Active</option>
+                            <option value="Inactive">Inactive</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="label" for="fieldVehicleModel">Model</label>
+                    <input type="text" class="input" id="fieldVehicleModel" name="vehicleModel" placeholder="e.g. Toyota Vios">
+                </div>
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                        <label class="label" for="fieldFuelType">Fuel Type</label>
+                        <input type="text" class="input" id="fieldFuelType" name="fuelType"
+                               list="fuelTypeOptions" autocomplete="off" placeholder="e.g. Unleaded">
+                        <datalist id="fuelTypeOptions">
+                            {% for f in fuel_types %}<option value="{{ f }}"></option>{% endfor %}
+                        </datalist>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldAssignedUserId">Assigned To</label>
+                        <select class="input" id="fieldAssignedUserId" name="assignedUserId">
+                            <option value="">Pool vehicle (unassigned)</option>
+                            {% for u in users %}
+                            <option value="{{ u.id }}">{{ u.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i data-lucide="check" class="h-4 w-4"></i>Save
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== Delete confirm modal ===================== -->
+<div id="deleteConfirmModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="deleteForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title">Delete vehicle</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="px-5 py-5">
+                <div class="flex items-start gap-3">
+                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+                        <i data-lucide="triangle-alert" class="h-5 w-5"></i>
+                    </span>
+                    <div>
+                        <p class="text-sm font-medium text-slate-900 dark:text-white">
+                            Delete <span id="deleteTargetName">this vehicle</span>?
+                        </p>
+                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                            Past Fuel PO requests for it stay on record but it won't be selectable for new ones.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-danger">
+                    <i data-lucide="trash-2" class="h-4 w-4"></i>Delete
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var recordForm = document.getElementById('recordForm');
+        var deleteForm = document.getElementById('deleteForm');
+        var modalTitle = document.getElementById('recordModalTitle');
+        var tbody = document.getElementById('recordsBody');
+        var addUrl = "{{ url_for('main.vehicles_add') }}";
+
+        function editUrl(id) { return '/page/parameters_vehicles/' + id + '/edit'; }
+        function deleteUrl(id) { return '/page/parameters_vehicles/' + id + '/delete'; }
+
+        function setField(id, value) { document.getElementById(id).value = value || ''; }
+
+        function openAdd() {
+            recordForm.reset();
+            recordForm.action = addUrl;
+            setField('fieldStatus', 'Active');
+            modalTitle.textContent = 'Add New Vehicle';
+            OS.openModal('recordModal');
+        }
+
+        function openEdit(row) {
+            recordForm.action = editUrl(row.getAttribute('data-id'));
+            setField('fieldPlateNumber', row.getAttribute('data-plate-number'));
+            setField('fieldVehicleModel', row.getAttribute('data-vehicle-model'));
+            setField('fieldFuelType', row.getAttribute('data-fuel-type'));
+            setField('fieldAssignedUserId', row.getAttribute('data-assigned-user-id'));
+            setField('fieldStatus', row.getAttribute('data-status') || 'Active');
+            modalTitle.textContent = 'Edit Vehicle';
+            OS.openModal('recordModal');
+        }
+
+        document.getElementById('addNewBtn').addEventListener('click', openAdd);
+
+        tbody.addEventListener('click', function (e) {
+            var editBtn = e.target.closest('.js-edit');
+            var delBtn = e.target.closest('.js-delete');
+
+            if (editBtn) openEdit(editBtn.closest('tr'));
+
+            if (delBtn) {
+                var row = delBtn.closest('tr');
+                deleteForm.action = deleteUrl(row.getAttribute('data-id'));
+                document.getElementById('deleteTargetName').textContent =
+                    row.getAttribute('data-plate-number') || 'this vehicle';
+                OS.openModal('deleteConfirmModal');
+            }
+        });
+
+        /* --------------------------------------------------------- search */
+        var search = document.getElementById('vehicleSearch');
+        var noResults = document.getElementById('noSearchResults');
+
+        function applyFilters() {
+            var term = search.value.trim().toLowerCase();
+            var shown = 0;
+
+            tbody.querySelectorAll('tr[data-id]').forEach(function (row) {
+                var haystack = (
+                    (row.getAttribute('data-plate-number') || '') + ' ' +
+                    (row.getAttribute('data-vehicle-model') || '') + ' ' +
+                    (row.getAttribute('data-fuel-type') || '') + ' ' +
+                    (row.getAttribute('data-assigned-user-name') || '')
+                ).toLowerCase();
+
+                var show = !term || haystack.indexOf(term) !== -1;
+                row.classList.toggle('hidden', !show);
+                if (show) shown++;
+            });
+
+            document.getElementById('vehicleCount').textContent = shown;
+            noResults.classList.toggle('hidden', shown > 0);
+        }
+
+        search.addEventListener('input', applyFilters);
+
+        applyFilters();
+    })();
+</script>
+{% endblock %}

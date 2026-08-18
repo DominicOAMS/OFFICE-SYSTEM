@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "office-system",
-      "runtimeExecutable": ".venv\\Scripts\\python.exe",
+      "runtimeExecutable": "venv\\Scripts\\python.exe",
       "runtimeArgs": ["run.py"],
       "port": 5000
     }

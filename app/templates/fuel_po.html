@@ -1,0 +1,594 @@
+{% extends "base.html" %}
+
+{% block title %}Fuel PO - Office System{% endblock %}
+
+{% block content %}
+{% set STATUS_TONE = {
+    'Pending Approval': 'badge-warning',
+    'Pending Final Approval': 'badge-warning',
+    'Approved': 'badge-success',
+    'Rejected': 'badge-accent'
+} %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="fuel" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Fuel PO</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    Request fuel, for yourself or on behalf of another user, and track approvals.
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Add Fuel PO
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="fuel" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Fuel PO Requests
+            </h2>
+            <div class="flex items-center gap-2">
+                <form method="GET" action="{{ url_for('main.fuel_po') }}" class="relative" id="searchForm">
+                    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" id="poSearch" value="{{ search }}"
+                           placeholder="Search PO #, name, plate, destination…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </form>
+                <span class="badge badge-slate whitespace-nowrap">{{ '{:,}'.format(total) }} shown</span>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+            {% for value, label in [
+                ('', 'All'),
+                ('Pending Approval', 'Pending Approval'),
+                ('Pending Final Approval', 'Pending Final Approval'),
+                ('Approved', 'Approved'),
+                ('Rejected', 'Rejected')
+            ] %}
+            <a href="{{ url_for('main.fuel_po', q=search or None, status=value or None) }}"
+               class="badge {{ 'bg-accent-600 text-white ring-0' if status == value else 'badge-slate' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[64rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th w-20">PO #</th>
+                        <th class="table-th w-24">Date</th>
+                        <th class="table-th">Requested For</th>
+                        <th class="table-th">Vehicle</th>
+                        <th class="table-th">Destination</th>
+                        <th class="table-th w-24">Amount</th>
+                        <th class="table-th w-40">Status</th>
+                        <th class="table-th w-36 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for fp in fuel_pos %}
+                    <tr class="table-row"
+                        data-id="{{ fp.id }}"
+                        data-request-date="{{ fp.requestDate }}"
+                        data-requested-for-name="{{ fp.requestedForName or fp.legacyDriverName or '—' }}"
+                        data-requested-by-name="{{ fp.requestedByName or '' }}"
+                        data-vehicle-plate="{{ fp.plateNumber or fp.legacyPlateNumber or '' }}"
+                        data-vehicle-model="{{ fp.vehicleModel or '' }}"
+                        data-fuel-type="{{ fp.fuelType or '' }}"
+                        data-destination="{{ fp.destination or '' }}"
+                        data-purpose="{{ fp.purpose or '' }}"
+                        data-odometer="{{ fp.odometer or '' }}"
+                        data-attachment-url="{{ url_for('main.fuel_po_attachment', po_id=fp.id) if fp.odometerAttachmentPath else '' }}"
+                        data-amount="{{ fp.amountRequested or '' }}"
+                        data-status="{{ fp.status }}"
+                        data-approver-name="{{ fp.approverName or '' }}"
+                        data-approver-remarks="{{ fp.approverRemarks or '' }}"
+                        data-final-approver-name="{{ fp.finalApproverName or '' }}"
+                        data-final-approver-remarks="{{ fp.finalApproverRemarks or '' }}">
+                        <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">
+                            {{ '%06d' % fp.id }}
+                        </td>
+                        <td class="table-td text-sm">{{ fp.requestDate }}</td>
+                        <td class="table-td">
+                            <p class="truncate font-medium text-slate-900 dark:text-white">{{ fp.requestedForName or fp.legacyDriverName or '—' }}</p>
+                            {% if fp.requestedByName and fp.requestedByUserId != fp.requestedForUserId %}
+                            <p class="truncate text-xs text-slate-500 dark:text-slate-400">on behalf of, by {{ fp.requestedByName }}</p>
+                            {% endif %}
+                        </td>
+                        <td class="table-td">
+                            {% if fp.plateNumber %}
+                            <p class="truncate font-mono text-sm">{{ fp.plateNumber }}</p>
+                            <p class="truncate text-xs text-slate-500 dark:text-slate-400">{{ fp.vehicleModel or '' }}</p>
+                            {% else %}
+                            <span class="text-slate-300 dark:text-slate-600">{{ fp.legacyPlateNumber or '—' }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="table-td truncate text-sm">{{ fp.destination or '—' }}</td>
+                        <td class="table-td text-sm">
+                            {% if fp.amountRequested %}₱{{ '{:,.2f}'.format(fp.amountRequested) }}{% else %}—{% endif %}
+                        </td>
+                        <td class="table-td">
+                            <span class="badge {{ STATUS_TONE.get(fp.status, 'badge-slate') }}">{{ fp.status }}</span>
+                            {% if fp.status in ('Pending Approval', 'Pending Final Approval') and fp.approverName %}
+                            <p class="mt-1 truncate text-[11px] text-slate-400">Approver: {{ fp.approverName }}</p>
+                            {% endif %}
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-view" title="View" aria-label="View Fuel PO">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                                {% if session.get('user_id') == fp.approverUserId and fp.status == 'Pending Approval' %}
+                                <button type="button" class="btn btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 js-approve"
+                                        data-url="{{ url_for('main.fuel_po_approve', po_id=fp.id) }}" title="Approve">
+                                    <i data-lucide="check" class="h-4 w-4"></i>
+                                </button>
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-reject"
+                                        data-url="{{ url_for('main.fuel_po_reject', po_id=fp.id) }}" title="Reject">
+                                    <i data-lucide="x" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if fp.status == 'Pending Final Approval' and session.get('user_id') in final_approver_ids %}
+                                <button type="button" class="btn btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 js-approve"
+                                        data-url="{{ url_for('main.fuel_po_final_approve', po_id=fp.id) }}" title="Give final approval">
+                                    <i data-lucide="check-check" class="h-4 w-4"></i>
+                                </button>
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-reject"
+                                        data-url="{{ url_for('main.fuel_po_final_reject', po_id=fp.id) }}" title="Reject">
+                                    <i data-lucide="x" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if session.get('user_id') == fp.requestedByUserId %}
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-delete"
+                                        title="Delete" aria-label="Delete Fuel PO">
+                                    <i data-lucide="trash-2" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="fuel" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No Fuel PO requests match your filters</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if page_count > 1 %}
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3
+                    dark:border-slate-800">
+            <p class="text-sm text-slate-500 dark:text-slate-400">
+                Showing <span class="font-medium text-slate-700 dark:text-slate-200">{{ ((page - 1) * per_page) + 1 }}</span>–<span
+                    class="font-medium text-slate-700 dark:text-slate-200">{{ [page * per_page, total]|min }}</span>
+                of <span class="font-medium text-slate-700 dark:text-slate-200">{{ '{:,}'.format(total) }}</span>
+            </p>
+
+            {% macro page_url(p) -%}
+                {{ url_for('main.fuel_po', page=p, q=search or None, status=status or None) }}
+            {%- endmacro %}
+
+            <nav class="flex items-center gap-1" aria-label="Pagination">
+                {% if page > 1 %}
+                    <a href="{{ page_url(page - 1) }}" class="btn btn-secondary btn-sm" aria-label="Previous page">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </span>
+                {% endif %}
+
+                {% set win_start = [1, page - 2]|max %}
+                {% set win_end = [page_count, win_start + 4]|min %}
+                {% set win_start = [1, win_end - 4]|max %}
+
+                {% if win_start > 1 %}
+                    <a href="{{ page_url(1) }}" class="btn btn-secondary btn-sm">1</a>
+                    {% if win_start > 2 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                {% endif %}
+
+                {% for p in range(win_start, win_end + 1) %}
+                    {% if p == page %}
+                        <span class="btn btn-sm bg-accent-600 text-white shadow-sm">{{ p }}</span>
+                    {% else %}
+                        <a href="{{ page_url(p) }}" class="btn btn-secondary btn-sm">{{ p }}</a>
+                    {% endif %}
+                {% endfor %}
+
+                {% if win_end < page_count %}
+                    {% if win_end < page_count - 1 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                    <a href="{{ page_url(page_count) }}" class="btn btn-secondary btn-sm">{{ page_count }}</a>
+                {% endif %}
+
+                {% if page < page_count %}
+                    <a href="{{ page_url(page + 1) }}" class="btn btn-secondary btn-sm" aria-label="Next page">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </span>
+                {% endif %}
+            </nav>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ===================== Add Fuel PO modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-2xl">
+        <form id="recordForm" method="POST" action="{{ url_for('main.fuel_po_add') }}" enctype="multipart/form-data">
+            <div class="modal-header">
+                <h3 class="modal-title">Add Fuel PO</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-5">
+
+                <div>
+                    <label class="label">Requesting Fuel For</label>
+                    <div class="flex items-center gap-4">
+                        <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                            <input type="radio" class="checkbox" name="requestFor" value="self" id="requestForSelf" checked> Myself
+                        </label>
+                        <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                            <input type="radio" class="checkbox" name="requestFor" value="other" id="requestForOther"> Another user
+                        </label>
+                    </div>
+                    <div id="otherUserWrap" class="hidden mt-2">
+                        <select class="input" id="fieldOtherUserId" name="otherUserId">
+                            <option value="">Select a user…</option>
+                            {% for u in users %}
+                            <option value="{{ u.id }}">{{ u.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="label" for="fieldVehicleId">Vehicle <span class="text-accent-600">*</span></label>
+                    <select class="input" id="fieldVehicleId" name="vehicleId" required>
+                        <option value="" disabled selected>Select a vehicle…</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                        <label class="label" for="fieldFuelType">Fuel Type</label>
+                        <input type="text" class="input" id="fieldFuelType" name="fuelType">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldAmount">Amount (₱) <span class="text-accent-600">*</span></label>
+                        <input type="number" class="input" id="fieldAmount" name="amountRequested" min="0" step="0.01" required>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="label" for="fieldDestination">Destination <span class="text-accent-600">*</span></label>
+                    <input type="text" class="input" id="fieldDestination" name="destination" required>
+                </div>
+                <div>
+                    <label class="label" for="fieldPurpose">Purpose</label>
+                    <input type="text" class="input" id="fieldPurpose" name="purpose">
+                </div>
+
+                <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                            <label class="label" for="fieldOdometer">Odometer (km)</label>
+                            <input type="number" class="input" id="fieldOdometer" name="odometer" min="0" step="1">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldAttachment">Odometer Photo (optional)</label>
+                            <input type="file" class="input" id="fieldAttachment" name="odometerAttachment" accept="image/*,.pdf">
+                        </div>
+                    </div>
+                    <div id="attachmentPreviewWrap" class="hidden mt-3">
+                        <img id="attachmentPreview" class="h-24 w-24 rounded-lg border border-slate-200 object-cover dark:border-slate-700" alt="Attachment preview">
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
+                    <label class="label" for="fieldApproverUserId">Approver <span class="text-accent-600">*</span></label>
+                    <select class="input" id="fieldApproverUserId" name="approverUserId" required>
+                        <option value="" disabled selected>Select an approver…</option>
+                        {% for a in approvers %}
+                        <option value="{{ a.userId }}">{{ a.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="help">They'll approve first; a Final Approver then gives final sign-off.</p>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i data-lucide="send" class="h-4 w-4"></i>Submit Fuel PO
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== View detail modal ===================== -->
+<div id="viewModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <h3 class="modal-title">Fuel PO Details</h3>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body space-y-3 text-sm">
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">Requested For</p><p id="viewRequestedFor" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Requested By</p><p id="viewRequestedBy" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Request Date</p><p id="viewRequestDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Status</p><p id="viewStatus" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Vehicle</p><p id="viewVehicle" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Fuel Type</p><p id="viewFuelType" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Amount</p><p id="viewAmount" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Odometer</p><p id="viewOdometer" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div><p class="help mb-0.5">Destination</p><p id="viewDestination" class="text-slate-700 dark:text-slate-300"></p></div>
+            <div><p class="help mb-0.5">Purpose</p><p id="viewPurpose" class="text-slate-700 dark:text-slate-300"></p></div>
+            <div id="viewAttachmentWrap" class="hidden">
+                <p class="help mb-1">Odometer Photo</p>
+                <a id="viewAttachmentLink" href="#" target="_blank" rel="noopener">
+                    <img id="viewAttachmentImg" class="h-40 w-40 rounded-lg border border-slate-200 object-cover dark:border-slate-700" alt="Odometer attachment">
+                </a>
+            </div>
+            <div class="border-t border-slate-200 pt-3 dark:border-slate-800">
+                <div><p class="help mb-0.5">Approver</p><p id="viewApprover" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div id="viewApproverRemarksWrap" class="hidden mt-1"><p class="help mb-0.5">Approver Remarks</p><p id="viewApproverRemarks" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div class="mt-2"><p class="help mb-0.5">Final Approver</p><p id="viewFinalApprover" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div id="viewFinalApproverRemarksWrap" class="hidden mt-1"><p class="help mb-0.5">Final Approver Remarks</p><p id="viewFinalApproverRemarks" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Approve/Reject modal ===================== -->
+<div id="actionModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="actionForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title" id="actionModalTitle">Approve Fuel PO</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <label class="label" for="actionRemarks">Remarks (optional)</label>
+                <textarea class="input" id="actionRemarks" name="remarks" rows="3"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary" id="actionSubmitBtn">
+                    <i data-lucide="check" class="h-4 w-4"></i>Approve
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== Delete confirm modal ===================== -->
+<div id="deleteConfirmModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="deleteForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title">Delete Fuel PO</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="px-5 py-5">
+                <div class="flex items-start gap-3">
+                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+                        <i data-lucide="triangle-alert" class="h-5 w-5"></i>
+                    </span>
+                    <div>
+                        <p class="text-sm font-medium text-slate-900 dark:text-white">Delete this Fuel PO request?</p>
+                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">This cannot be undone from here.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-danger">
+                    <i data-lucide="trash-2" class="h-4 w-4"></i>Delete
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var CURRENT_USER_ID = {{ (session.get('user_id') or 0)|tojson }};
+        var VEHICLES = {{ vehicles|tojson }};
+
+        var recordForm = document.getElementById('recordForm');
+        var tbody = document.getElementById('recordsBody');
+
+        /* ------------------------------------------------- request-for toggle */
+        var otherUserWrap = document.getElementById('otherUserWrap');
+        var otherUserSelect = document.getElementById('fieldOtherUserId');
+        var vehicleSelect = document.getElementById('fieldVehicleId');
+        var fuelTypeInput = document.getElementById('fieldFuelType');
+
+        function currentSubjectUserId() {
+            if (document.getElementById('requestForOther').checked) {
+                return parseInt(otherUserSelect.value, 10) || null;
+            }
+            return CURRENT_USER_ID;
+        }
+
+        function renderVehicleOptions() {
+            var subject = currentSubjectUserId();
+            var assigned = VEHICLES.filter(function (v) { return v.assignedUserId === subject; });
+            var others = VEHICLES.filter(function (v) { return v.assignedUserId !== subject; });
+            var html = '<option value="" disabled selected>Select a vehicle…</option>';
+
+            function optionsFor(list) {
+                return list.map(function (v) {
+                    return '<option value="' + v.id + '" data-fuel-type="' + (v.fuelType || '').replace(/"/g, '&quot;') + '">'
+                        + v.plateNumber + (v.vehicleModel ? ' — ' + v.vehicleModel : '') + '</option>';
+                }).join('');
+            }
+
+            if (assigned.length) {
+                html += '<optgroup label="Assigned to this requester">' + optionsFor(assigned) + '</optgroup>';
+            }
+            html += '<optgroup label="Other Vehicles">' + optionsFor(others) + '</optgroup>';
+            vehicleSelect.innerHTML = html;
+        }
+
+        document.querySelectorAll('input[name="requestFor"]').forEach(function (radio) {
+            radio.addEventListener('change', function () {
+                otherUserWrap.classList.toggle('hidden', this.value !== 'other');
+                renderVehicleOptions();
+            });
+        });
+        otherUserSelect.addEventListener('change', renderVehicleOptions);
+
+        vehicleSelect.addEventListener('change', function () {
+            var opt = vehicleSelect.options[vehicleSelect.selectedIndex];
+            if (opt && opt.getAttribute('data-fuel-type')) {
+                fuelTypeInput.value = opt.getAttribute('data-fuel-type');
+            }
+        });
+
+        /* ------------------------------------------------- attachment preview */
+        var attachmentInput = document.getElementById('fieldAttachment');
+        var attachmentPreviewWrap = document.getElementById('attachmentPreviewWrap');
+        var attachmentPreview = document.getElementById('attachmentPreview');
+
+        attachmentInput.addEventListener('change', function () {
+            var file = attachmentInput.files[0];
+            if (file && file.type.indexOf('image/') === 0) {
+                attachmentPreview.src = URL.createObjectURL(file);
+                attachmentPreviewWrap.classList.remove('hidden');
+            } else {
+                attachmentPreviewWrap.classList.add('hidden');
+            }
+        });
+
+        /* ------------------------------------------------------------- add */
+        document.getElementById('addNewBtn').addEventListener('click', function () {
+            recordForm.reset();
+            document.getElementById('requestForSelf').checked = true;
+            otherUserWrap.classList.add('hidden');
+            attachmentPreviewWrap.classList.add('hidden');
+            renderVehicleOptions();
+            OS.openModal('recordModal');
+        });
+
+        /* --------------------------------------------------------- view/approve/reject/delete */
+        var viewFields = {
+            viewRequestedFor: 'requested-for-name', viewRequestedBy: 'requested-by-name',
+            viewRequestDate: 'request-date', viewStatus: 'status', viewFuelType: 'fuel-type',
+            viewDestination: 'destination', viewPurpose: 'purpose',
+            viewApprover: 'approver-name', viewFinalApprover: 'final-approver-name'
+        };
+
+        function openView(row) {
+            Object.keys(viewFields).forEach(function (elId) {
+                document.getElementById(elId).textContent = row.getAttribute('data-' + viewFields[elId]) || '—';
+            });
+            var plate = row.getAttribute('data-vehicle-plate'), model = row.getAttribute('data-vehicle-model');
+            document.getElementById('viewVehicle').textContent = plate ? (plate + (model ? ' — ' + model : '')) : '—';
+            var odometer = row.getAttribute('data-odometer');
+            document.getElementById('viewOdometer').textContent = odometer ? (odometer + ' km') : '—';
+            var amount = row.getAttribute('data-amount');
+            document.getElementById('viewAmount').textContent = amount ? ('₱' + Number(amount).toLocaleString(undefined, {minimumFractionDigits: 2})) : '—';
+
+            var attachmentUrl = row.getAttribute('data-attachment-url');
+            document.getElementById('viewAttachmentWrap').classList.toggle('hidden', !attachmentUrl);
+            if (attachmentUrl) {
+                document.getElementById('viewAttachmentLink').href = attachmentUrl;
+                document.getElementById('viewAttachmentImg').src = attachmentUrl;
+            }
+
+            var approverRemarks = row.getAttribute('data-approver-remarks');
+            document.getElementById('viewApproverRemarksWrap').classList.toggle('hidden', !approverRemarks);
+            document.getElementById('viewApproverRemarks').textContent = approverRemarks || '';
+
+            var finalRemarks = row.getAttribute('data-final-approver-remarks');
+            document.getElementById('viewFinalApproverRemarksWrap').classList.toggle('hidden', !finalRemarks);
+            document.getElementById('viewFinalApproverRemarks').textContent = finalRemarks || '';
+
+            OS.openModal('viewModal');
+        }
+
+        var actionForm = document.getElementById('actionForm');
+        var actionModalTitle = document.getElementById('actionModalTitle');
+        var actionSubmitBtn = document.getElementById('actionSubmitBtn');
+
+        function openAction(url, isReject) {
+            actionForm.action = url;
+            document.getElementById('actionRemarks').value = '';
+            actionModalTitle.textContent = isReject ? 'Reject Fuel PO' : 'Approve Fuel PO';
+            actionSubmitBtn.className = 'btn ' + (isReject ? 'btn-danger' : 'btn-primary');
+            actionSubmitBtn.innerHTML = isReject
+                ? '<i data-lucide="x" class="h-4 w-4"></i>Reject'
+                : '<i data-lucide="check" class="h-4 w-4"></i>Approve';
+            OS.refreshIcons();
+            OS.openModal('actionModal');
+        }
+
+        var deleteForm = document.getElementById('deleteForm');
+
+        tbody.addEventListener('click', function (e) {
+            var viewBtn = e.target.closest('.js-view');
+            var approveBtn = e.target.closest('.js-approve');
+            var rejectBtn = e.target.closest('.js-reject');
+            var delBtn = e.target.closest('.js-delete');
+
+            if (viewBtn) openView(viewBtn.closest('tr'));
+            if (approveBtn) openAction(approveBtn.getAttribute('data-url'), false);
+            if (rejectBtn) openAction(rejectBtn.getAttribute('data-url'), true);
+            if (delBtn) {
+                deleteForm.action = '/page/purchase_order_fuel/' + delBtn.closest('tr').getAttribute('data-id') + '/delete';
+                OS.openModal('deleteConfirmModal');
+            }
+        });
+
+        /* --------------------------------------------------------------- search */
+        var searchInput = document.getElementById('poSearch');
+        searchInput.addEventListener('search', function () {
+            if (searchInput.value === '') document.getElementById('searchForm').submit();
+        });
+    })();
+</script>
+{% endblock %}

@@ -1,10 +1,23 @@
+import os
+import uuid
 from functools import wraps
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, session, url_for
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    session,
+    url_for,
+)
 from pymysql.err import IntegrityError
 from werkzeug.security import check_password_hash
 
-from . import customers_repo, program_menu_repo, suppliers_repo, users_repo
+from . import customers_repo, fuel_approvers_repo, fuel_po_repo, program_menu_repo, suppliers_repo, users_repo, vehicles_repo
 from .nav import flatten_slugs
 from .security import DEFAULT_PASSWORD, PASSWORD_REQUIREMENTS, is_valid_password
 
@@ -557,6 +570,295 @@ def user_accounts_reset_password(user_id):
         "success",
     )
     return redirect(url_for("main.user_accounts"))
+
+
+def _parse_vehicle_form():
+    return {
+        "plateNumber": request.form.get("plateNumber", "").strip(),
+        "vehicleModel": request.form.get("vehicleModel", "").strip() or None,
+        "fuelType": request.form.get("fuelType", "").strip() or None,
+        "assignedUserId": int(request.form["assignedUserId"]) if request.form.get("assignedUserId") else None,
+        "status": "Inactive" if request.form.get("status") == "Inactive" else "Active",
+    }
+
+
+@main_bp.route("/page/parameters_vehicles")
+@login_required
+def vehicles():
+    records = vehicles_repo.list_active_vehicles()
+    fuel_types = sorted({v["fuelType"] for v in records if v["fuelType"]})
+    return render_template(
+        "vehicles.html", vehicles=records, users=users_repo.list_active_users(), fuel_types=fuel_types
+    )
+
+
+@main_bp.route("/page/parameters_vehicles/add", methods=["POST"])
+@login_required
+def vehicles_add():
+    data = _parse_vehicle_form()
+    if not data["plateNumber"]:
+        flash("Plate number is required.", "error")
+        return redirect(url_for("main.vehicles"))
+
+    try:
+        vehicles_repo.create_vehicle(data, created_by=session.get("user_id"))
+    except IntegrityError:
+        flash(f'Plate number "{data["plateNumber"]}" is already in use.', "error")
+        return redirect(url_for("main.vehicles"))
+
+    flash(f'Vehicle "{data["plateNumber"]}" added.', "success")
+    return redirect(url_for("main.vehicles"))
+
+
+@main_bp.route("/page/parameters_vehicles/<int:vehicle_id>/edit", methods=["POST"])
+@login_required
+def vehicles_edit(vehicle_id):
+    data = _parse_vehicle_form()
+    if not data["plateNumber"]:
+        flash("Plate number is required.", "error")
+        return redirect(url_for("main.vehicles"))
+
+    try:
+        vehicles_repo.update_vehicle(vehicle_id, data, updated_by=session.get("user_id"))
+    except IntegrityError:
+        flash(f'Plate number "{data["plateNumber"]}" is already in use.', "error")
+        return redirect(url_for("main.vehicles"))
+
+    flash(f'Vehicle "{data["plateNumber"]}" updated.', "success")
+    return redirect(url_for("main.vehicles"))
+
+
+@main_bp.route("/page/parameters_vehicles/<int:vehicle_id>/delete", methods=["POST"])
+@login_required
+def vehicles_delete(vehicle_id):
+    vehicles_repo.soft_delete_vehicle(vehicle_id, updated_by=session.get("user_id"))
+    flash("Vehicle deleted.", "success")
+    return redirect(url_for("main.vehicles"))
+
+
+@main_bp.route("/page/parameters_fuel_approvers")
+@login_required
+def fuel_approvers():
+    return render_template(
+        "fuel_approvers.html",
+        approvers=fuel_approvers_repo.list_approvers(),
+        final_approvers=fuel_approvers_repo.list_final_approvers(),
+        users=users_repo.list_active_users(),
+    )
+
+
+@main_bp.route("/page/parameters_fuel_approvers/add", methods=["POST"])
+@login_required
+def fuel_approvers_add():
+    user_id = request.form.get("userId", "").strip()
+    role = request.form.get("role", "").strip()
+    if role not in ("Approver", "Final Approver") or not user_id.isdigit():
+        flash("Choose a user and a role.", "error")
+        return redirect(url_for("main.fuel_approvers"))
+
+    fuel_approvers_repo.add_approver(int(user_id), role, created_by=session.get("user_id"))
+    flash(f"{role} added.", "success")
+    return redirect(url_for("main.fuel_approvers"))
+
+
+@main_bp.route("/page/parameters_fuel_approvers/<int:approver_id>/remove", methods=["POST"])
+@login_required
+def fuel_approvers_remove(approver_id):
+    fuel_approvers_repo.remove_approver(approver_id, updated_by=session.get("user_id"))
+    flash("Removed.", "success")
+    return redirect(url_for("main.fuel_approvers"))
+
+
+ATTACHMENT_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
+
+
+def _save_attachment(file_storage):
+    if not file_storage or not file_storage.filename:
+        return None
+    ext = os.path.splitext(file_storage.filename)[1].lower()
+    if ext not in ATTACHMENT_EXTENSIONS:
+        raise ValueError("Attachment must be a photo (jpg/png/webp) or a PDF.")
+    filename = f"{uuid.uuid4().hex}{ext}"
+    file_storage.save(os.path.join(current_app.config["UPLOAD_FOLDER"], filename))
+    return filename
+
+
+def _parse_money(value):
+    value = (value or "").strip().replace(",", "")
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    return f"{parsed:.2f}" if parsed > 0 else None
+
+
+def _parse_fuel_po_form():
+    other_user_id = request.form.get("otherUserId", "").strip()
+    requested_for_user_id = (
+        int(other_user_id)
+        if request.form.get("requestFor") == "other" and other_user_id.isdigit()
+        else session.get("user_id")
+    )
+    vehicle_id = request.form.get("vehicleId", "").strip()
+    approver_user_id = request.form.get("approverUserId", "").strip()
+    odometer = request.form.get("odometer", "").strip()
+    return {
+        "requestedForUserId": requested_for_user_id,
+        "requestedByUserId": session.get("user_id"),
+        "vehicleId": int(vehicle_id) if vehicle_id.isdigit() else None,
+        "fuelType": request.form.get("fuelType", "").strip() or None,
+        "destination": request.form.get("destination", "").strip() or None,
+        "purpose": request.form.get("purpose", "").strip() or None,
+        "odometer": int(odometer) if odometer.isdigit() else None,
+        "amountRequested": _parse_money(request.form.get("amountRequested")),
+        "approverUserId": int(approver_user_id) if approver_user_id.isdigit() else None,
+    }
+
+
+FUEL_PO_PER_PAGE = 30
+
+
+@main_bp.route("/page/purchase_order_fuel")
+@login_required
+def fuel_po():
+    search = request.args.get("q", "").strip()
+    status = request.args.get("status", "").strip()
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    total = fuel_po_repo.count_fuel_pos(search or None, status or None)
+    page_count = max(1, -(-total // FUEL_PO_PER_PAGE))  # ceil
+    page = min(page, page_count)
+
+    records = fuel_po_repo.list_fuel_pos(
+        search=search or None,
+        status=status or None,
+        limit=FUEL_PO_PER_PAGE,
+        offset=(page - 1) * FUEL_PO_PER_PAGE,
+    )
+    return render_template(
+        "fuel_po.html",
+        fuel_pos=records,
+        vehicles=vehicles_repo.list_active_vehicles(),
+        users=users_repo.list_active_users(),
+        approvers=fuel_approvers_repo.list_approvers(),
+        final_approver_ids={a["userId"] for a in fuel_approvers_repo.list_final_approvers()},
+        search=search,
+        status=status,
+        page=page,
+        page_count=page_count,
+        total=total,
+        per_page=FUEL_PO_PER_PAGE,
+    )
+
+
+@main_bp.route("/page/purchase_order_fuel/add", methods=["POST"])
+@login_required
+def fuel_po_add():
+    data = _parse_fuel_po_form()
+    if not data["vehicleId"] or not data["approverUserId"] or not data["destination"] or not data["amountRequested"]:
+        flash("Vehicle, Destination, Amount, and Approver are required.", "error")
+        return redirect(url_for("main.fuel_po"))
+
+    try:
+        data["odometerAttachmentPath"] = _save_attachment(request.files.get("odometerAttachment"))
+    except ValueError as e:
+        flash(str(e), "error")
+        return redirect(url_for("main.fuel_po"))
+
+    try:
+        fuel_po_repo.create_fuel_po(data, created_by=session.get("user_id"))
+    except IntegrityError:
+        flash("Could not submit — one of the selected records no longer exists.", "error")
+        return redirect(url_for("main.fuel_po"))
+
+    flash("Fuel PO submitted for approval.", "success")
+    return redirect(url_for("main.fuel_po"))
+
+
+@main_bp.route("/page/purchase_order_fuel/<int:po_id>/delete", methods=["POST"])
+@login_required
+def fuel_po_delete(po_id):
+    po = fuel_po_repo.get_fuel_po(po_id)
+    if not po:
+        abort(404)
+    if po["requestedByUserId"] != session.get("user_id"):
+        abort(403)
+    fuel_po_repo.soft_delete_fuel_po(po_id, updated_by=session.get("user_id"))
+    flash("Fuel PO deleted.", "success")
+    return redirect(url_for("main.fuel_po"))
+
+
+@main_bp.route("/page/purchase_order_fuel/<int:po_id>/approve", methods=["POST"])
+@login_required
+def fuel_po_approve(po_id):
+    po = fuel_po_repo.get_fuel_po(po_id)
+    if not po:
+        abort(404)
+    if po["status"] != "Pending Approval" or po["approverUserId"] != session.get("user_id"):
+        abort(403)
+    fuel_po_repo.approve_stage1(
+        po_id, approved_by=session.get("user_id"), remarks=request.form.get("remarks", "").strip() or None
+    )
+    flash("Fuel PO approved and routed to the Final Approver.", "success")
+    return redirect(url_for("main.fuel_po"))
+
+
+@main_bp.route("/page/purchase_order_fuel/<int:po_id>/reject", methods=["POST"])
+@login_required
+def fuel_po_reject(po_id):
+    po = fuel_po_repo.get_fuel_po(po_id)
+    if not po:
+        abort(404)
+    if po["status"] != "Pending Approval" or po["approverUserId"] != session.get("user_id"):
+        abort(403)
+    fuel_po_repo.reject_stage1(
+        po_id, rejected_by=session.get("user_id"), remarks=request.form.get("remarks", "").strip() or None
+    )
+    flash("Fuel PO rejected.", "success")
+    return redirect(url_for("main.fuel_po"))
+
+
+@main_bp.route("/page/purchase_order_fuel/<int:po_id>/final-approve", methods=["POST"])
+@login_required
+def fuel_po_final_approve(po_id):
+    po = fuel_po_repo.get_fuel_po(po_id)
+    if not po:
+        abort(404)
+    if po["status"] != "Pending Final Approval" or not fuel_approvers_repo.is_final_approver(session.get("user_id")):
+        abort(403)
+    fuel_po_repo.approve_stage2(
+        po_id, approved_by=session.get("user_id"), remarks=request.form.get("remarks", "").strip() or None
+    )
+    flash("Fuel PO given final approval.", "success")
+    return redirect(url_for("main.fuel_po"))
+
+
+@main_bp.route("/page/purchase_order_fuel/<int:po_id>/final-reject", methods=["POST"])
+@login_required
+def fuel_po_final_reject(po_id):
+    po = fuel_po_repo.get_fuel_po(po_id)
+    if not po:
+        abort(404)
+    if po["status"] != "Pending Final Approval" or not fuel_approvers_repo.is_final_approver(session.get("user_id")):
+        abort(403)
+    fuel_po_repo.reject_stage2(
+        po_id, rejected_by=session.get("user_id"), remarks=request.form.get("remarks", "").strip() or None
+    )
+    flash("Fuel PO rejected.", "success")
+    return redirect(url_for("main.fuel_po"))
+
+
+@main_bp.route("/page/purchase_order_fuel/<int:po_id>/attachment")
+@login_required
+def fuel_po_attachment(po_id):
+    po = fuel_po_repo.get_fuel_po(po_id)
+    if not po or not po["odometerAttachmentPath"]:
+        abort(404)
+    return send_from_directory(current_app.config["UPLOAD_FOLDER"], po["odometerAttachmentPath"])
 
 
 @main_bp.route("/page/<slug>")
