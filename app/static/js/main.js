@@ -147,12 +147,16 @@
 
     /* -------------------------------------------------------------- Modals */
 
-    var lastFocused = null;
+    // A stack (not a single variable) so nested modals - one opened on top of
+    // another, e.g. a map picker over the Add Fuel PO form - each remember their
+    // own opener and Escape/close acts on the topmost one, not just the first
+    // modal found in the document.
+    var modalStack = [];
 
     function openModal(id) {
         var modal = document.getElementById(id);
         if (!modal) return;
-        lastFocused = document.activeElement;
+        modalStack.push({ modal: modal, previouslyFocused: document.activeElement });
         modal.classList.remove("hidden");
         document.body.classList.add("overflow-hidden");
         refreshIcons();
@@ -174,12 +178,21 @@
         var modal = typeof id === "string" ? document.getElementById(id) : id;
         if (!modal) return;
         modal.classList.add("hidden");
+
+        var entry = null;
+        for (var i = modalStack.length - 1; i >= 0; i--) {
+            if (modalStack[i].modal === modal) {
+                entry = modalStack.splice(i, 1)[0];
+                break;
+            }
+        }
+
         // Only release the scroll lock once every modal is closed.
         if (!document.querySelector("[data-modal]:not(.hidden)")) {
             document.body.classList.remove("overflow-hidden");
         }
-        if (lastFocused && typeof lastFocused.focus === "function") {
-            lastFocused.focus();
+        if (entry && entry.previouslyFocused && typeof entry.previouslyFocused.focus === "function") {
+            entry.previouslyFocused.focus();
         }
     }
 
@@ -209,8 +222,8 @@
 
         document.addEventListener("keydown", function (e) {
             if (e.key !== "Escape") return;
-            var open = document.querySelector("[data-modal]:not(.hidden)");
-            if (open) closeModal(open);
+            var top = modalStack[modalStack.length - 1];
+            if (top) closeModal(top.modal);
         });
     }
 

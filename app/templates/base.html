@@ -8,6 +8,7 @@
     <link href="{{ url_for('static', filename='img/user.png') }}" rel="icon">
 
     {% include "_head.html" %}
+    {% block head %}{% endblock %}
 </head>
 
 <body class="h-full bg-slate-50 text-slate-800 antialiased dark:bg-slate-950 dark:text-slate-200">

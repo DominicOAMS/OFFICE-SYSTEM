@@ -17,7 +17,17 @@ from flask import (
 from pymysql.err import IntegrityError
 from werkzeug.security import check_password_hash
 
-from . import customers_repo, fuel_approvers_repo, fuel_po_repo, program_menu_repo, suppliers_repo, users_repo, vehicles_repo
+from . import (
+    customers_repo,
+    fuel_approvers_repo,
+    fuel_po_repo,
+    fuel_prices_repo,
+    program_menu_repo,
+    suppliers_repo,
+    users_repo,
+    vehicles_repo,
+)
+from . import routing
 from .nav import flatten_slugs
 from .security import DEFAULT_PASSWORD, PASSWORD_REQUIREMENTS, is_valid_password
 
@@ -572,11 +582,22 @@ def user_accounts_reset_password(user_id):
     return redirect(url_for("main.user_accounts"))
 
 
+FUEL_PRICE_CATEGORIES = ("Diesel", "Unleaded", "Premium")
+
+
 def _parse_vehicle_form():
+    fuel_efficiency = request.form.get("fuelEfficiencyKmPerLiter", "").strip()
+    try:
+        fuel_efficiency_value = float(fuel_efficiency) if fuel_efficiency else None
+    except ValueError:
+        fuel_efficiency_value = None
+    price_category = request.form.get("fuelPriceCategory", "").strip()
     return {
         "plateNumber": request.form.get("plateNumber", "").strip(),
         "vehicleModel": request.form.get("vehicleModel", "").strip() or None,
         "fuelType": request.form.get("fuelType", "").strip() or None,
+        "fuelEfficiencyKmPerLiter": fuel_efficiency_value,
+        "fuelPriceCategory": price_category if price_category in FUEL_PRICE_CATEGORIES else None,
         "assignedUserId": int(request.form["assignedUserId"]) if request.form.get("assignedUserId") else None,
         "status": "Inactive" if request.form.get("status") == "Inactive" else "Active",
     }
@@ -669,6 +690,52 @@ def fuel_approvers_remove(approver_id):
     return redirect(url_for("main.fuel_approvers"))
 
 
+@main_bp.route("/page/parameters_fuel_prices")
+@login_required
+def fuel_prices():
+    return render_template(
+        "fuel_prices.html", prices=fuel_prices_repo.list_prices(), origin=fuel_prices_repo.get_origin()
+    )
+
+
+@main_bp.route("/page/parameters_fuel_prices/update-price", methods=["POST"])
+@login_required
+def fuel_prices_update_price():
+    fuel_category = request.form.get("fuelCategory", "").strip()
+    if fuel_category not in FUEL_PRICE_CATEGORIES:
+        flash("Unknown fuel category.", "error")
+        return redirect(url_for("main.fuel_prices"))
+
+    price = _parse_money(request.form.get("pricePerLiter"))
+    if not price:
+        flash("Enter a valid price per liter.", "error")
+        return redirect(url_for("main.fuel_prices"))
+
+    fuel_prices_repo.update_price(fuel_category, price, updated_by=session.get("user_id"))
+    flash(f"{fuel_category} price updated.", "success")
+    return redirect(url_for("main.fuel_prices"))
+
+
+@main_bp.route("/page/parameters_fuel_prices/update-origin", methods=["POST"])
+@login_required
+def fuel_prices_update_origin():
+    address = request.form.get("originAddress", "").strip()
+    lat = request.form.get("originLat", "").strip()
+    lng = request.form.get("originLng", "").strip()
+    if not address or not lat or not lng:
+        flash("Search for an address and confirm its location on the map first.", "error")
+        return redirect(url_for("main.fuel_prices"))
+
+    try:
+        fuel_prices_repo.update_origin(address, float(lat), float(lng), updated_by=session.get("user_id"))
+    except ValueError:
+        flash("Couldn't read that location — try searching again.", "error")
+        return redirect(url_for("main.fuel_prices"))
+
+    flash("Trip origin updated.", "success")
+    return redirect(url_for("main.fuel_prices"))
+
+
 ATTACHMENT_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
 
 
@@ -692,6 +759,13 @@ def _parse_money(value):
     return f"{parsed:.2f}" if parsed > 0 else None
 
 
+def _parse_coordinate(value):
+    try:
+        return float(value) if value else None
+    except ValueError:
+        return None
+
+
 def _parse_fuel_po_form():
     other_user_id = request.form.get("otherUserId", "").strip()
     requested_for_user_id = (
@@ -705,9 +779,16 @@ def _parse_fuel_po_form():
     return {
         "requestedForUserId": requested_for_user_id,
         "requestedByUserId": session.get("user_id"),
+        "startLocation": request.form.get("startLocation", "").strip() or None,
+        "startLat": _parse_coordinate(request.form.get("startLat", "").strip()),
+        "startLng": _parse_coordinate(request.form.get("startLng", "").strip()),
         "vehicleId": int(vehicle_id) if vehicle_id.isdigit() else None,
         "fuelType": request.form.get("fuelType", "").strip() or None,
         "destination": request.form.get("destination", "").strip() or None,
+        "destinationLat": _parse_coordinate(request.form.get("destinationLat", "").strip()),
+        "destinationLng": _parse_coordinate(request.form.get("destinationLng", "").strip()),
+        "estimatedDistanceKm": _parse_coordinate(request.form.get("estimatedDistanceKm", "").strip()),
+        "estimatedAmount": _parse_money(request.form.get("estimatedAmount")),
         "purpose": request.form.get("purpose", "").strip() or None,
         "odometer": int(odometer) if odometer.isdigit() else None,
         "amountRequested": _parse_money(request.form.get("amountRequested")),
@@ -746,6 +827,7 @@ def fuel_po():
         users=users_repo.list_active_users(),
         approvers=fuel_approvers_repo.list_approvers(),
         final_approver_ids={a["userId"] for a in fuel_approvers_repo.list_final_approvers()},
+        default_origin=fuel_prices_repo.get_origin(),
         search=search,
         status=status,
         page=page,
@@ -753,6 +835,49 @@ def fuel_po():
         total=total,
         per_page=FUEL_PO_PER_PAGE,
     )
+
+
+@main_bp.route("/page/purchase_order_fuel/estimate", methods=["POST"])
+@login_required
+def fuel_po_estimate():
+    vehicle_id = request.form.get("vehicleId", "").strip()
+    start_lat = _parse_coordinate(request.form.get("startLat", "").strip())
+    start_lng = _parse_coordinate(request.form.get("startLng", "").strip())
+    dest_lat = _parse_coordinate(request.form.get("destinationLat", "").strip())
+    dest_lng = _parse_coordinate(request.form.get("destinationLng", "").strip())
+
+    vehicle = vehicles_repo.get_vehicle(int(vehicle_id)) if vehicle_id.isdigit() else None
+    if not vehicle:
+        return {"error": "Select a vehicle first."}, 400
+    if start_lat is None or start_lng is None:
+        return {"error": "Pick a starting location first."}, 400
+    if dest_lat is None or dest_lng is None:
+        return {"error": "Pick a destination on the map first."}, 400
+    if not vehicle["fuelEfficiencyKmPerLiter"]:
+        return {"error": "This vehicle doesn't have a fuel efficiency set yet — add one in Parameters > Vehicles."}, 200
+    if not vehicle["fuelPriceCategory"]:
+        return {"error": "This vehicle doesn't have a fuel price category set yet — set one in Parameters > Vehicles."}, 200
+
+    price_row = fuel_prices_repo.get_price(vehicle["fuelPriceCategory"])
+    if not price_row or not price_row["pricePerLiter"]:
+        return {
+            "error": f'No price set for {vehicle["fuelPriceCategory"]} yet — set one in Parameters > Fuel Prices.'
+        }, 200
+
+    distance_km = routing.get_driving_distance_km(start_lat, start_lng, dest_lat, dest_lng)
+    if distance_km is None:
+        return {"error": "Couldn't calculate a route between those locations — enter the amount manually."}, 200
+
+    liters = round(distance_km / float(vehicle["fuelEfficiencyKmPerLiter"]), 2)
+    price_per_liter = float(price_row["pricePerLiter"])
+    estimated_amount = round(liters * price_per_liter, 2)
+
+    return {
+        "distanceKm": distance_km,
+        "liters": liters,
+        "pricePerLiter": price_per_liter,
+        "estimatedAmount": estimated_amount,
+    }
 
 
 @main_bp.route("/page/purchase_order_fuel/add", methods=["POST"])

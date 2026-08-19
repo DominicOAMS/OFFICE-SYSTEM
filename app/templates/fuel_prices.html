@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}Fuel Prices - Office System{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex items-start gap-3">
+        <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                     dark:bg-brand-500/10 dark:text-brand-400">
+            <i data-lucide="gauge" class="h-5 w-5"></i>
+        </span>
+        <div>
+            <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Fuel Prices</h1>
+            <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                Trip origin and current pump prices used to estimate Fuel PO amounts.
+            </p>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+
+        <!-- ===================== Trip origin ===================== -->
+        <div class="card overflow-hidden">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <i data-lucide="map-pin" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                    Default Starting Location
+                </h2>
+            </div>
+            <form method="POST" action="{{ url_for('main.fuel_prices_update_origin') }}" id="originForm" class="space-y-4 px-5 py-5">
+                <p class="text-xs text-slate-500 dark:text-slate-400">
+                    Pre-fills "Current Location" on Add Fuel PO — requesters can still pick their own
+                    starting point instead (e.g. "Use My Location" or the map) if they're not there.
+                </p>
+                <div>
+                    <label class="label" for="originSearch">Address</label>
+                    <div class="flex gap-2">
+                        <input type="text" class="input flex-1" id="originSearch"
+                               value="{{ origin.originAddress or '' }}" placeholder="e.g. warehouse or office address">
+                        <button type="button" class="btn btn-secondary shrink-0" id="originLocateBtn">
+                            <i data-lucide="search" class="h-4 w-4"></i>Locate
+                        </button>
+                    </div>
+                    <p class="help">Search, then click anywhere on the map to fine-tune the pin.</p>
+                </div>
+                <div id="originMap" class="h-56 w-full rounded-xl border border-slate-200 dark:border-slate-700"></div>
+                <input type="hidden" name="originAddress" id="fieldOriginAddress" value="{{ origin.originAddress or '' }}">
+                <input type="hidden" name="originLat" id="fieldOriginLat" value="{{ origin.originLat or '' }}">
+                <input type="hidden" name="originLng" id="fieldOriginLng" value="{{ origin.originLng or '' }}">
+                <button type="submit" class="btn btn-primary">
+                    <i data-lucide="check" class="h-4 w-4"></i>Save Origin
+                </button>
+            </form>
+        </div>
+
+        <!-- ===================== Fuel prices ===================== -->
+        <div class="card overflow-hidden">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <i data-lucide="banknote" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                    Current Prices
+                </h2>
+            </div>
+            <div class="divide-y divide-slate-200 dark:divide-slate-800">
+                {% for p in prices %}
+                <form method="POST" action="{{ url_for('main.fuel_prices_update_price') }}" class="flex items-end gap-3 px-5 py-4">
+                    <input type="hidden" name="fuelCategory" value="{{ p.fuelCategory }}">
+                    <div class="flex-1">
+                        <label class="label">{{ p.fuelCategory }} (₱/liter)</label>
+                        <input type="number" class="input" name="pricePerLiter" min="0" step="0.01"
+                               value="{{ p.pricePerLiter or '' }}" placeholder="Not set">
+                        <p class="help">
+                            {% if p.updatedAt and p.pricePerLiter %}Updated {{ p.updatedAt.strftime('%b %d, %Y') }}{% else %}Not set yet{% endif %}
+                        </p>
+                    </div>
+                    <a href="https://doe.gov.ph/articles/group/liquid-fuels?category=Oil+Monitor&display_type=Card"
+                       target="_blank" rel="noopener" class="btn btn-secondary btn-sm shrink-0" title="Check the latest DOE Oil Monitor bulletin">
+                        <i data-lucide="external-link" class="h-3.5 w-3.5"></i>Quick Check
+                    </a>
+                    <button type="submit" class="btn btn-primary shrink-0">
+                        <i data-lucide="check" class="h-4 w-4"></i>Save
+                    </button>
+                </form>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var fieldLat = document.getElementById('fieldOriginLat');
+        var fieldLng = document.getElementById('fieldOriginLng');
+        var fieldAddress = document.getElementById('fieldOriginAddress');
+        var searchInput = document.getElementById('originSearch');
+
+        var startLat = parseFloat(fieldLat.value) || 14.2117; // Calamba, Laguna as a sensible PH default
+        var startLng = parseFloat(fieldLng.value) || 121.1653;
+
+        var map = L.map('originMap').setView([startLat, startLng], fieldLat.value ? 14 : 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19,
+        }).addTo(map);
+
+        var marker = fieldLat.value ? L.marker([startLat, startLng]).addTo(map) : null;
+
+        function setLocation(lat, lng) {
+            fieldLat.value = lat;
+            fieldLng.value = lng;
+            if (marker) {
+                marker.setLatLng([lat, lng]);
+            } else {
+                marker = L.marker([lat, lng]).addTo(map);
+            }
+            map.setView([lat, lng], 15);
+        }
+
+        map.on('click', function (e) {
+            setLocation(e.latlng.lat, e.latlng.lng);
+        });
+
+        document.getElementById('originLocateBtn').addEventListener('click', function () {
+            var query = searchInput.value.trim();
+            if (!query) return;
+            fetch('https://nominatim.openstreetmap.org/search?format=json&countrycodes=ph&limit=1&q=' + encodeURIComponent(query))
+                .then(function (r) { return r.json(); })
+                .then(function (results) {
+                    if (!results.length) {
+                        alert('No location found for that address. Try a more specific search, or click the map directly.');
+                        return;
+                    }
+                    setLocation(parseFloat(results[0].lat), parseFloat(results[0].lon));
+                    fieldAddress.value = searchInput.value.trim();
+                })
+                .catch(function () {
+                    alert('Could not search right now. Try clicking the map directly instead.');
+                });
+        });
+
+        document.getElementById('originForm').addEventListener('submit', function () {
+            fieldAddress.value = searchInput.value.trim();
+        });
+
+        setTimeout(function () { map.invalidateSize(); }, 100);
+    })();
+</script>
+{% endblock %}

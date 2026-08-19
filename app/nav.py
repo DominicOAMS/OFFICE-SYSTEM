@@ -65,6 +65,7 @@ NAV_ITEMS = [
             {"label": "Inventory Items", "icon": "boxes", "slug": "parameters_inventory_items"},
             {"label": "Vehicles", "icon": "car", "slug": "parameters_vehicles"},
             {"label": "Fuel Approvers", "icon": "shield-check", "slug": "parameters_fuel_approvers"},
+            {"label": "Fuel Prices", "icon": "gauge", "slug": "parameters_fuel_prices"},
         ],
     },
 ]

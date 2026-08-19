@@ -83,20 +83,31 @@ def create_fuel_po(data, created_by):
             cur.execute(
                 """
                 INSERT INTO tbl_fuel_pos
-                    (requestDate, requestedForUserId, requestedByUserId, vehicleId, fuelType,
-                     destination, purpose, odometer, odometerAttachmentPath, amountRequested,
+                    (requestDate, requestedForUserId, requestedByUserId, startLocation, startLat, startLng,
+                     vehicleId, fuelType,
+                     destination, destinationLat, destinationLng, estimatedDistanceKm, estimatedAmount,
+                     purpose, odometer, odometerAttachmentPath, amountRequested,
                      approverUserId, status, isDeleted, createdBy, createdAt, updatedBy, updatedAt)
                 VALUES
-                    (CURDATE(), %s, %s, %s, %s,
+                    (CURDATE(), %s, %s, %s, %s, %s,
+                     %s, %s,
                      %s, %s, %s, %s, %s,
+                     %s, %s, %s, %s,
                      %s, 'Pending Approval', 0, %s, NOW(), %s, NOW())
                 """,
                 (
                     data["requestedForUserId"],
                     data["requestedByUserId"],
+                    data["startLocation"],
+                    data["startLat"],
+                    data["startLng"],
                     data["vehicleId"],
                     data["fuelType"],
                     data["destination"],
+                    data["destinationLat"],
+                    data["destinationLng"],
+                    data["estimatedDistanceKm"],
+                    data["estimatedAmount"],
                     data["purpose"],
                     data["odometer"],
                     data["odometerAttachmentPath"],

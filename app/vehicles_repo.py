@@ -36,16 +36,18 @@ def create_vehicle(data, created_by):
             cur.execute(
                 """
                 INSERT INTO tbl_vehicles
-                    (plateNumber, vehicleModel, fuelType, assignedUserId, status,
-                     isDeleted, createdBy, createdAt, updatedBy, updatedAt)
+                    (plateNumber, vehicleModel, fuelType, fuelEfficiencyKmPerLiter, fuelPriceCategory,
+                     assignedUserId, status, isDeleted, createdBy, createdAt, updatedBy, updatedAt)
                 VALUES
                     (%s, %s, %s, %s, %s,
-                     0, %s, NOW(), %s, NOW())
+                     %s, %s, 0, %s, NOW(), %s, NOW())
                 """,
                 (
                     data["plateNumber"],
                     data["vehicleModel"],
                     data["fuelType"],
+                    data["fuelEfficiencyKmPerLiter"],
+                    data["fuelPriceCategory"],
                     data["assignedUserId"],
                     data["status"],
                     created_by,
@@ -64,7 +66,8 @@ def update_vehicle(vehicle_id, data, updated_by):
             cur.execute(
                 """
                 UPDATE tbl_vehicles
-                SET plateNumber = %s, vehicleModel = %s, fuelType = %s, assignedUserId = %s, status = %s,
+                SET plateNumber = %s, vehicleModel = %s, fuelType = %s, fuelEfficiencyKmPerLiter = %s,
+                    fuelPriceCategory = %s, assignedUserId = %s, status = %s,
                     updatedBy = %s, updatedAt = NOW()
                 WHERE id = %s
                 """,
@@ -72,6 +75,8 @@ def update_vehicle(vehicle_id, data, updated_by):
                     data["plateNumber"],
                     data["vehicleModel"],
                     data["fuelType"],
+                    data["fuelEfficiencyKmPerLiter"],
+                    data["fuelPriceCategory"],
                     data["assignedUserId"],
                     data["status"],
                     updated_by,

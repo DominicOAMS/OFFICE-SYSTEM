@@ -62,6 +62,8 @@
                         data-plate-number="{{ v.plateNumber or '' }}"
                         data-vehicle-model="{{ v.vehicleModel or '' }}"
                         data-fuel-type="{{ v.fuelType or '' }}"
+                        data-fuel-efficiency="{{ v.fuelEfficiencyKmPerLiter or '' }}"
+                        data-price-category="{{ v.fuelPriceCategory or '' }}"
                         data-assigned-user-id="{{ v.assignedUserId or '' }}"
                         data-assigned-user-name="{{ v.assignedUserName or '' }}"
                         data-status="{{ v.status or 'Active' }}">
@@ -172,6 +174,29 @@
                         </select>
                     </div>
                 </div>
+                <div class="border-t border-slate-200 pt-4 dark:border-slate-800">
+                    <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Fuel estimation
+                    </p>
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                            <label class="label" for="fieldFuelEfficiency">Fuel Efficiency (km/L)</label>
+                            <input type="number" class="input" id="fieldFuelEfficiency" name="fuelEfficiencyKmPerLiter"
+                                   min="0" step="0.1" placeholder="e.g. 10">
+                            <p class="help">Needed for Add Fuel PO to suggest an amount for this vehicle.</p>
+                        </div>
+                        <div>
+                            <label class="label" for="fieldPriceCategory">Price Category</label>
+                            <select class="input" id="fieldPriceCategory" name="fuelPriceCategory">
+                                <option value="">Not set</option>
+                                <option value="Diesel">Diesel</option>
+                                <option value="Unleaded">Unleaded</option>
+                                <option value="Premium">Premium</option>
+                            </select>
+                            <p class="help">Suggested from Fuel Type — check it's right.</p>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="modal-footer">
@@ -247,6 +272,8 @@
             setField('fieldPlateNumber', row.getAttribute('data-plate-number'));
             setField('fieldVehicleModel', row.getAttribute('data-vehicle-model'));
             setField('fieldFuelType', row.getAttribute('data-fuel-type'));
+            setField('fieldFuelEfficiency', row.getAttribute('data-fuel-efficiency'));
+            setField('fieldPriceCategory', row.getAttribute('data-price-category'));
             setField('fieldAssignedUserId', row.getAttribute('data-assigned-user-id'));
             setField('fieldStatus', row.getAttribute('data-status') || 'Active');
             modalTitle.textContent = 'Edit Vehicle';
@@ -254,6 +281,22 @@
         }
 
         document.getElementById('addNewBtn').addEventListener('click', openAdd);
+
+        /* ---------------------------------------- price category auto-suggest */
+        function suggestPriceCategory(fuelTypeText) {
+            if (!fuelTypeText.trim()) return null;
+            if (/diesel/i.test(fuelTypeText)) return 'Diesel';
+            if (/premium|racing|v-?power/i.test(fuelTypeText)) return 'Premium';
+            return 'Unleaded';
+        }
+
+        document.getElementById('fieldFuelType').addEventListener('blur', function () {
+            var categoryField = document.getElementById('fieldPriceCategory');
+            if (!categoryField.value) {
+                var suggestion = suggestPriceCategory(this.value);
+                if (suggestion) categoryField.value = suggestion;
+            }
+        });
 
         tbody.addEventListener('click', function (e) {
             var editBtn = e.target.closest('.js-edit');
