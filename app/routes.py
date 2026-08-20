@@ -1,6 +1,8 @@
 import json
 import os
 import uuid
+from datetime import date
+from decimal import Decimal
 from functools import wraps
 
 from flask import (
@@ -15,7 +17,7 @@ from flask import (
     session,
     url_for,
 )
-from pymysql.err import IntegrityError
+from pymysql.err import DataError, IntegrityError
 from werkzeug.security import check_password_hash
 
 from . import (
@@ -745,7 +747,104 @@ def _parse_coordinate(value):
         return None
 
 
+def _clip(value, limit=255):
+    """Everything bound into a VARCHAR(255) goes through here. Nominatim display_name
+    labels run 60-120 characters each, so a 3-stop itinerary already blows past 255 - and
+    under MySQL's default STRICT_TRANS_TABLES that is a DataError thrown mid-INSERT, not a
+    silent truncation. Multi-date requests make it routine."""
+    value = value or ""
+    return value if len(value) <= limit else value[: limit - 1] + "…"
+
+
+def _parse_trip_date(value):
+    """A trip's date as a datetime.date. Anything that isn't a real ISO yyyy-mm-dd is
+    rejected outright rather than coerced, so a typo can never land as NULL."""
+    try:
+        return date.fromisoformat((value or "").strip())
+    except (ValueError, TypeError):
+        return None
+
+
+def _sum_or_none(values):
+    """SUM semantics: missing values are skipped, all-missing rolls up to None not 0."""
+    present = [v for v in values if v is not None]
+    return round(sum(present), 2) if present else None
+
+
+def _sum_money_or_none(values):
+    """_parse_money hands back 2dp strings; summed as Decimal so the PO total is exactly
+    the sum of the per-date amounts shown on screen, to the cent, with no float drift."""
+    present = [Decimal(v) for v in values if v is not None]
+    return f"{sum(present):.2f}" if present else None
+
+
+def _clean_destinations(parsed):
+    """The validation half of destination parsing, shared with _parse_trips (which already
+    holds a decoded list). Drops any stop missing a real label + lat + lng - a stop with no
+    coordinates can't be routed, so keeping it would only corrupt the estimate."""
+    if not isinstance(parsed, list):
+        return []
+    destinations = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        lat = _parse_coordinate(str(item.get("lat", "")))
+        lng = _parse_coordinate(str(item.get("lng", "")))
+        label = _clip((item.get("label") or "").strip())
+        if lat is None or lng is None or not label:
+            continue
+        destinations.append({"label": label, "lat": lat, "lng": lng})
+    return destinations
+
+
 def _parse_destinations(raw_json):
+    """Decode + validate a flat destinations payload. Still the estimate endpoint's entry
+    point, unchanged in signature."""
+    try:
+        parsed = json.loads(raw_json or "[]")
+    except ValueError:
+        return []
+    return _clean_destinations(parsed)
+
+
+def _summarize_stops(destinations):
+    """One date's itinerary - the same " → " shape the single-trip flow always used."""
+    return _clip(" → ".join(d["label"] for d in destinations)) or None
+
+
+def _summarize_trips(trips):
+    """tbl_fuel_pos.destination stays the one-line searchable summary of the whole PO - the
+    list column reads it and _filter_clauses LIKEs it. A single-date PO keeps exactly the
+    old "A → B → C" text so nothing about how existing rows look changes; only multi-date
+    POs take the date-prefixed "Aug 21: A → B | Aug 22: C" form.
+
+    %b %d rather than %-d: %-d is glibc-only and raises on Windows, which is this platform.
+    """
+    if not trips:
+        return None
+    if len(trips) == 1:
+        return trips[0]["destination"]
+    return _clip(
+        " | ".join(f'{t["date"].strftime("%b %d")}: {t["destination"] or "—"}' for t in trips)
+    )
+
+
+MAX_TRIPS_PER_PO = 30
+MAX_STOPS_PER_TRIP = 20
+
+
+def _parse_trips(raw_json):
+    """The nested dated-trips payload from the Add form.
+
+    A whole trip is DROPPED (not silently patched) when it's missing any of the three
+    things that make it a trip - a real date, at least one mappable destination, and an
+    amount above zero. Dropping rather than patching means a malformed payload surfaces as
+    "add at least one date" instead of quietly creating a PO whose total doesn't match what
+    the requester saw on screen.
+
+    Capped because an unbounded payload is one insert (and one potential routing call) per
+    element; the UI can't produce anything near these caps.
+    """
     try:
         parsed = json.loads(raw_json or "[]")
     except ValueError:
@@ -753,17 +852,31 @@ def _parse_destinations(raw_json):
     if not isinstance(parsed, list):
         return []
 
-    destinations = []
-    for item in parsed:
+    trips = []
+    for item in parsed[:MAX_TRIPS_PER_PO]:
         if not isinstance(item, dict):
             continue
-        lat = _parse_coordinate(str(item.get("lat", "")))
-        lng = _parse_coordinate(str(item.get("lng", "")))
-        label = (item.get("label") or "").strip()
-        if lat is None or lng is None or not label:
+        trip_date = _parse_trip_date(item.get("date"))
+        destinations = _clean_destinations(item.get("destinations"))[:MAX_STOPS_PER_TRIP]
+        # str() wrappers are required, not stylistic: _parse_money does (value or "").strip()
+        # which raises AttributeError on a raw JSON float.
+        amount = _parse_money(str(item.get("amountRequested", "")))
+        if trip_date is None or not destinations or amount is None:
             continue
-        destinations.append({"label": label, "lat": lat, "lng": lng})
-    return destinations
+        trips.append(
+            {
+                "date": trip_date,
+                "startLocation": _clip((item.get("startLocation") or "").strip()) or None,
+                "startLat": _parse_coordinate(str(item.get("startLat", ""))),
+                "startLng": _parse_coordinate(str(item.get("startLng", ""))),
+                "destinations": destinations,
+                "destination": _summarize_stops(destinations),
+                "estimatedDistanceKm": _parse_coordinate(str(item.get("estimatedDistanceKm", ""))),
+                "estimatedAmount": _parse_money(str(item.get("estimatedAmount", ""))),
+                "amountRequested": amount,
+            }
+        )
+    return trips
 
 
 def _parse_fuel_po_form():
@@ -777,30 +890,49 @@ def _parse_fuel_po_form():
     approver_user_id = request.form.get("approverUserId", "").strip()
     odometer = request.form.get("odometer", "").strip()
     fuel_efficiency = request.form.get("fuelEfficiencyKmPerLiter", "").strip()
-    destinations = _parse_destinations(request.form.get("destinationsJson"))
+    trips = _parse_trips(request.form.get("tripsJson"))
+    first_trip = trips[0] if trips else None
     return {
         "requestedForUserId": requested_for_user_id,
         "requestedByUserId": session.get("user_id"),
-        "startLocation": request.form.get("startLocation", "").strip() or None,
-        "startLat": _parse_coordinate(request.form.get("startLat", "").strip()),
-        "startLng": _parse_coordinate(request.form.get("startLng", "").strip()),
         "vehicleId": int(vehicle_id) if vehicle_id.isdigit() else None,
         "fuelType": request.form.get("fuelType", "").strip() or None,
         "fuelEfficiencyKmPerLiter": _parse_coordinate(fuel_efficiency),
-        "destinations": destinations,
-        "destination": " → ".join(d["label"] for d in destinations) or None,
-        "destinationLat": None,
-        "destinationLng": None,
-        "estimatedDistanceKm": _parse_coordinate(request.form.get("estimatedDistanceKm", "").strip()),
-        "estimatedAmount": _parse_money(request.form.get("estimatedAmount")),
         "purpose": request.form.get("purpose", "").strip() or None,
         "odometer": int(odometer) if odometer.isdigit() else None,
-        "amountRequested": _parse_money(request.form.get("amountRequested")),
         "approverUserId": int(approver_user_id) if approver_user_id.isdigit() else None,
+        "trips": trips,
+        # PO-level rollups. Kept denormalized so the list page, the View modal's data-*
+        # attributes and _filter_clauses' destination LIKE all keep reading one row per PO
+        # with no changes.
+        "startLocation": first_trip["startLocation"] if first_trip else None,
+        "startLat": first_trip["startLat"] if first_trip else None,
+        "startLng": first_trip["startLng"] if first_trip else None,
+        "destination": _summarize_trips(trips),
+        "destinationLat": None,
+        "destinationLng": None,
+        "estimatedDistanceKm": _sum_or_none(t["estimatedDistanceKm"] for t in trips),
+        "estimatedAmount": _sum_money_or_none(t["estimatedAmount"] for t in trips),
+        "amountRequested": _sum_money_or_none(t["amountRequested"] for t in trips),
     }
 
 
 FUEL_PO_PER_PAGE = 30
+
+
+def _trip_for_view(trip):
+    """Display-ready primitives for the View modal's per-date breakdown. Built here rather
+    than handed raw to |tojson because DB rows carry decimal.Decimal and datetime.date,
+    whose JSON encoding is a Flask-version detail (dates would come out as RFC-822
+    'Thu, 21 Aug 2026 00:00:00 GMT', which is not what anyone wants on screen)."""
+    return {
+        "date": trip["tripDate"].strftime("%b %d, %Y") if trip["tripDate"] else None,
+        "startLocation": trip["startLocation"],
+        "destination": trip["destination"],
+        "stops": [d["destination"] for d in trip["destinations"]],
+        "distanceKm": float(trip["estimatedDistanceKm"]) if trip["estimatedDistanceKm"] is not None else None,
+        "amount": float(trip["amountRequested"]) if trip["amountRequested"] is not None else None,
+    }
 
 
 @main_bp.route("/page/purchase_order_fuel")
@@ -824,9 +956,14 @@ def fuel_po():
         limit=FUEL_PO_PER_PAGE,
         offset=(page - 1) * FUEL_PO_PER_PAGE,
     )
+    trips_by_po = {
+        po_id: [_trip_for_view(t) for t in trips]
+        for po_id, trips in fuel_po_repo.list_trips_for_fuel_pos([r["id"] for r in records]).items()
+    }
     return render_template(
         "fuel_po.html",
         fuel_pos=records,
+        trips_by_po=trips_by_po,
         vehicles=vehicles_repo.list_active_vehicles(),
         users=users_repo.list_active_users(),
         approvers=fuel_approvers_repo.list_approvers(),
@@ -843,6 +980,14 @@ def fuel_po():
 @main_bp.route("/page/purchase_order_fuel/estimate", methods=["POST"])
 @login_required
 def fuel_po_estimate():
+    """Estimate ONE date's trip. The Add form calls this once per date, only for the date
+    being edited - a bulk server-side loop would multiply routing calls against a limited
+    daily quota and could serialize several 15s timeouts into one request.
+
+    tripKey is an opaque client token echoed straight back, so a slow response can't be
+    applied to the wrong date's card if the requester edits two dates quickly.
+    """
+    trip_key = request.form.get("tripKey", "")[:32]
     vehicle_id = request.form.get("vehicleId", "").strip()
     start_lat = _parse_coordinate(request.form.get("startLat", "").strip())
     start_lng = _parse_coordinate(request.form.get("startLng", "").strip())
@@ -851,32 +996,43 @@ def fuel_po_estimate():
 
     vehicle = vehicles_repo.get_vehicle(int(vehicle_id)) if vehicle_id.isdigit() else None
     if not vehicle:
-        return {"error": "Select a vehicle first."}, 400
+        return {"tripKey": trip_key, "error": "Select a vehicle first."}, 400
     if start_lat is None or start_lng is None:
-        return {"error": "Pick a starting location first."}, 400
+        return {"tripKey": trip_key, "error": "Pick a starting location first."}, 400
     if not destinations:
-        return {"error": "Add at least one destination first."}, 400
+        return {"tripKey": trip_key, "error": "Add at least one destination first."}, 400
     if not efficiency or efficiency <= 0:
-        return {"error": "Enter your vehicle's fuel efficiency (km/L) to see an estimate."}, 200
+        return {
+            "tripKey": trip_key,
+            "error": "Enter your vehicle's fuel efficiency (km/L) to see an estimate.",
+        }, 200
     if not vehicle["fuelPriceCategory"]:
-        return {"error": "This vehicle doesn't have a fuel price category set yet — set one in Parameters > Vehicles."}, 200
+        return {
+            "tripKey": trip_key,
+            "error": "This vehicle doesn't have a fuel price category set yet — set one in Parameters > Vehicles.",
+        }, 200
 
     price_row = fuel_prices_repo.get_price(vehicle["fuelPriceCategory"])
     if not price_row or not price_row["pricePerLiter"]:
         return {
-            "error": f'No price set for {vehicle["fuelPriceCategory"]} yet — set one in Parameters > Fuel Prices.'
+            "tripKey": trip_key,
+            "error": f'No price set for {vehicle["fuelPriceCategory"]} yet — set one in Parameters > Fuel Prices.',
         }, 200
 
     waypoints = [(start_lat, start_lng)] + [(d["lat"], d["lng"]) for d in destinations]
     distance_km = routing.get_route_distance_km(waypoints)
     if distance_km is None:
-        return {"error": "Couldn't calculate a route between those locations — enter the amount manually."}, 200
+        return {
+            "tripKey": trip_key,
+            "error": "Couldn't calculate a route between those locations — enter the amount manually.",
+        }, 200
 
     liters = round(distance_km / efficiency, 2)
     price_per_liter = float(price_row["pricePerLiter"])
     estimated_amount = round(liters * price_per_liter, 2)
 
     return {
+        "tripKey": trip_key,
         "distanceKm": distance_km,
         "liters": liters,
         "pricePerLiter": price_per_liter,
@@ -888,8 +1044,18 @@ def fuel_po_estimate():
 @login_required
 def fuel_po_add():
     data = _parse_fuel_po_form()
-    if not data["vehicleId"] or not data["approverUserId"] or not data["destinations"] or not data["amountRequested"]:
-        flash("Vehicle, at least one Destination, Amount, and Approver are required.", "error")
+    if not data["vehicleId"] or not data["approverUserId"]:
+        flash("Vehicle and Approver are required.", "error")
+        return redirect(url_for("main.fuel_po"))
+    # _parse_trips guarantees every surviving trip has a date, >=1 destination and an
+    # amount, so a non-empty list always rolls up to a non-None total - no separate
+    # amountRequested check needed.
+    if not data["trips"]:
+        flash(
+            "Add at least one date — every date needs a starting location, at least one "
+            "destination, and an amount.",
+            "error",
+        )
         return redirect(url_for("main.fuel_po"))
 
     try:
@@ -900,11 +1066,19 @@ def fuel_po_add():
 
     try:
         fuel_po_repo.create_fuel_po(data, created_by=session.get("user_id"))
-    except IntegrityError:
-        flash("Could not submit — one of the selected records no longer exists.", "error")
+    except (IntegrityError, DataError):
+        flash(
+            "Could not submit — one of the selected records no longer exists, or a "
+            "location name was too long to save.",
+            "error",
+        )
         return redirect(url_for("main.fuel_po"))
 
-    flash("Fuel PO submitted for approval.", "success")
+    trip_count = len(data["trips"])
+    flash(
+        f"Fuel PO submitted for approval ({trip_count} date{'s' if trip_count != 1 else ''}).",
+        "success",
+    )
     return redirect(url_for("main.fuel_po"))
 
 

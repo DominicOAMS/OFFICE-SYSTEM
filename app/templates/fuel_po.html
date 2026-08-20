@@ -104,11 +104,23 @@
                         data-approver-name="{{ fp.approverName or '' }}"
                         data-approver-remarks="{{ fp.approverRemarks or '' }}"
                         data-final-approver-name="{{ fp.finalApproverName or '' }}"
-                        data-final-approver-remarks="{{ fp.finalApproverRemarks or '' }}">
+                        data-final-approver-remarks="{{ fp.finalApproverRemarks or '' }}"
+                        {# single-quoted: Flask's tojson escapes < > & ' but NOT ", and JSON
+                           is full of " - double quotes here would end the attribute early
+                           and corrupt the row's markup #}
+                        data-trips='{{ trips_by_po.get(fp.id, [])|tojson }}'>
                         <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">
                             {{ '%06d' % fp.id }}
                         </td>
-                        <td class="table-td text-sm">{{ fp.requestDate }}</td>
+                        {% set po_trips = trips_by_po.get(fp.id, []) %}
+                        <td class="table-td text-sm">
+                            {% if po_trips|length > 1 %}
+                            <span class="badge badge-brand whitespace-nowrap">{{ po_trips|length }} dates</span>
+                            <p class="mt-1 truncate text-[11px] text-slate-400">{{ po_trips[0].date }}</p>
+                            {% else %}
+                            {{ fp.requestDate }}
+                            {% endif %}
+                        </td>
                         <td class="table-td">
                             <p class="truncate font-medium text-slate-900 dark:text-white">{{ fp.requestedForName or fp.legacyDriverName or '—' }}</p>
                             {% if fp.requestedByName and fp.requestedByUserId != fp.requestedForUserId %}
@@ -295,39 +307,30 @@
                     </div>
                 </div>
 
-                <div>
-                    <label class="label" for="fieldStartLocation">Current Location <span class="text-accent-600">*</span></label>
-                    <div class="flex gap-2">
-                        <input type="text" class="input flex-1 cursor-not-allowed bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400"
-                               id="fieldStartLocation" name="startLocation" required readonly placeholder="Where are you starting from?">
-                        <button type="button" class="btn btn-secondary shrink-0" id="useMyLocationBtn">
-                            <i data-lucide="locate-fixed" class="h-4 w-4"></i>Use My Location
-                        </button>
-                        <button type="button" class="btn btn-secondary shrink-0" id="pickStartBtn">
-                            <i data-lucide="map-pin" class="h-4 w-4"></i>Pick on Map
-                        </button>
-                    </div>
-                    <input type="hidden" id="fieldStartLat" name="startLat">
-                    <input type="hidden" id="fieldStartLng" name="startLng">
-                </div>
+                <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
+                    <label class="label">Dates &amp; Destinations <span class="text-accent-600">*</span></label>
+                    <p class="help mb-3">
+                        One card per travel date — each gets its own starting point, stops and fuel estimate.
+                    </p>
 
-                <div>
-                    <label class="label">Destinations <span class="text-accent-600">*</span></label>
-                    <div id="destinationsList" class="mb-2 space-y-2"></div>
-                    <p class="hidden text-sm text-slate-400 dark:text-slate-500" id="noDestinationsNote">No destinations added yet.</p>
-                    <button type="button" class="btn btn-secondary btn-sm" id="addDestinationBtn">
-                        <i data-lucide="plus" class="h-3.5 w-3.5"></i>Add Destination
+                    <div id="tripsList" class="space-y-3"></div>
+
+                    <button type="button" class="btn btn-secondary mt-3" id="addTripBtn">
+                        <i data-lucide="calendar-plus" class="h-4 w-4"></i>Add Another Date
                     </button>
-                    <input type="hidden" id="fieldDestinationsJson" name="destinationsJson">
-                    <input type="hidden" id="fieldEstimatedDistanceKm" name="estimatedDistanceKm">
-                    <input type="hidden" id="fieldEstimatedAmount" name="estimatedAmount">
-                    <p class="hidden mt-2 rounded-lg px-3 py-2 text-sm" id="estimateSummary"></p>
+
+                    <input type="hidden" id="fieldTripsJson" name="tripsJson">
+                    {# Hidden, not disabled: a disabled input is never submitted. The sum is
+                       recomputed client-side and re-derived server-side from the trips. #}
+                    <input type="hidden" id="fieldAmount" name="amountRequested">
+
+                    <div class="mt-4 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3
+                                dark:border-slate-700 dark:bg-slate-800/50">
+                        <span class="text-sm font-medium text-slate-700 dark:text-slate-300">Total Amount</span>
+                        <span class="text-lg font-semibold text-slate-900 dark:text-white" id="grandTotalDisplay">₱0.00</span>
+                    </div>
                 </div>
 
-                <div>
-                    <label class="label" for="fieldAmount">Amount (₱) <span class="text-accent-600">*</span></label>
-                    <input type="number" class="input" id="fieldAmount" name="amountRequested" min="0" step="0.01" required>
-                </div>
                 <div>
                     <label class="label" for="fieldPurpose">Purpose</label>
                     <input type="text" class="input" id="fieldPurpose" name="purpose">
@@ -371,6 +374,53 @@
     </div>
 </div>
 
+{# One trip card = one travel date. Kept in a <template> rather than a JS string so the
+   markup lives with the rest of the HTML, and because template.content is a detached
+   fragment - lucide.createIcons() scans the live document, so these icons aren't
+   converted prematurely. No ids inside: cards are keyed by data-trip uid, since ids
+   would collide once there's more than one card. #}
+<template id="tripCardTemplate">
+    <div class="js-trip-card rounded-xl border border-slate-200 p-4 dark:border-slate-700" data-trip="">
+        <div class="mb-3 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+                <span class="js-trip-number grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-50
+                             text-xs font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"></span>
+                <input type="date" class="js-trip-date input py-1.5 text-sm">
+            </div>
+            <button type="button" class="js-remove-trip btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                    data-action="remove-trip" aria-label="Remove this date">
+                <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+        </div>
+
+        <label class="label">Starting Location <span class="text-accent-600">*</span></label>
+        <div class="flex flex-wrap gap-2">
+            <input type="text" class="js-trip-start input min-w-0 flex-1 cursor-not-allowed bg-slate-50 text-slate-500
+                                      dark:bg-slate-800/50 dark:text-slate-400"
+                   readonly placeholder="Where are you starting from?">
+            <button type="button" class="btn btn-secondary shrink-0" data-action="use-my-location">
+                <i data-lucide="locate-fixed" class="h-4 w-4"></i>My Location
+            </button>
+            <button type="button" class="btn btn-secondary shrink-0" data-action="pick-start">
+                <i data-lucide="map-pin" class="h-4 w-4"></i>Map
+            </button>
+        </div>
+
+        <label class="label mt-3">Destinations <span class="text-accent-600">*</span></label>
+        <div class="js-trip-destinations mb-2 space-y-2"></div>
+        <p class="js-no-destinations text-sm text-slate-400 dark:text-slate-500">No destinations added yet.</p>
+        <button type="button" class="btn btn-secondary btn-sm" data-action="add-destination">
+            <i data-lucide="plus" class="h-3.5 w-3.5"></i>Add Destination
+        </button>
+
+        <div class="mt-3">
+            <label class="label">Amount for this date (₱) <span class="text-accent-600">*</span></label>
+            <input type="number" class="js-trip-amount input" min="0" step="0.01">
+        </div>
+        <p class="js-trip-estimate hidden mt-2 rounded-lg px-3 py-2 text-sm"></p>
+    </div>
+</template>
+
 <!-- ===================== View detail modal ===================== -->
 <div id="viewModal" data-modal class="modal-backdrop hidden">
     <div class="modal-panel max-w-lg">
@@ -391,8 +441,10 @@
                 <div><p class="help mb-0.5">Amount</p><p id="viewAmount" class="text-slate-700 dark:text-slate-300"></p></div>
                 <div><p class="help mb-0.5">Odometer</p><p id="viewOdometer" class="text-slate-700 dark:text-slate-300"></p></div>
             </div>
-            <div><p class="help mb-0.5">Starting From</p><p id="viewStartLocation" class="text-slate-700 dark:text-slate-300"></p></div>
-            <div><p class="help mb-0.5">Destination</p><p id="viewDestination" class="text-slate-700 dark:text-slate-300"></p></div>
+            <div>
+                <p class="help mb-1">Itinerary</p>
+                <div id="viewTrips" class="space-y-2"></div>
+            </div>
             <div><p class="help mb-0.5">Purpose</p><p id="viewPurpose" class="text-slate-700 dark:text-slate-300"></p></div>
             <div id="viewAttachmentWrap" class="hidden">
                 <p class="help mb-1">Odometer Photo</p>
@@ -472,7 +524,7 @@
 <div id="mapPickerModal" data-modal class="modal-backdrop hidden">
     <div class="modal-panel max-w-2xl">
         <div class="modal-header">
-            <h3 class="modal-title">Pick Destination</h3>
+            <h3 class="modal-title" id="mapPickerTitle">Pick Location</h3>
             <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
                 <i data-lucide="x" class="h-4 w-4"></i>
             </button>
@@ -633,10 +685,12 @@
             var opt = vehicleSelect.options[vehicleSelect.selectedIndex];
             fuelTypeInput.value = (opt && opt.getAttribute('data-fuel-type')) || '';
             fuelEfficiencyInput.value = (opt && opt.getAttribute('data-fuel-efficiency')) || '';
-            fetchEstimate();
+            estimateAllTrips();
         });
 
-        fuelEfficiencyInput.addEventListener('change', fetchEstimate);
+        // Vehicle/efficiency are PO-level, so changing either invalidates every date's
+        // estimate at once.
+        fuelEfficiencyInput.addEventListener('change', estimateAllTrips);
 
         /* ------------------------------------------------- attachment preview */
         var attachmentInput = document.getElementById('fieldAttachment');
@@ -653,55 +707,248 @@
             }
         });
 
-        /* ------------------------------------------------- start/destination(s) map picker */
-        // One shared map picker modal serves "Current Location" (a single point, re-picking
-        // replaces it) and "Destinations" (a list - each confirm appends a new stop).
-        var startLocation = null;   // {lat, lng, label} or null
-        var destinations = [];      // ordered [{lat, lng, label}, ...], one or more stops
+        /* ------------------------------------------------- dated trips (date + start + stops) */
+        // A Fuel PO is a list of dated trips. Each trip card owns its own date, starting
+        // point, destinations, estimate and amount; the PO total is their sum.
+        //
+        // Cards are keyed by a minted uid ('t1', 't2', ...), NEVER by array index. Indices
+        // shift when a trip is removed; a uid never moves. With index keys, deleting trip 1
+        // while trip 2's estimate is still in flight would land trip 2's result in what is
+        // now trip 1 - silent, hard-to-reproduce corruption of a money field.
+        var trips = [];
+        var tripUidCounter = 0;
+
+        var tripsList = document.getElementById('tripsList');
+        var tripCardTemplate = document.getElementById('tripCardTemplate');
+        var fieldTripsJson = document.getElementById('fieldTripsJson');
+        var fieldAmount = document.getElementById('fieldAmount');
+        var grandTotalDisplay = document.getElementById('grandTotalDisplay');
+
         var activeTarget = null;    // 'start' | 'destination'
-        var tempPicked = null;      // {lat, lng, label} marked on the open map, before confirm
+        var activeTripUid = null;   // which card the open map picker is writing into
+        var tempPicked = null;      // {lat, lng, label} pinned on the open map, pre-confirm
 
         var destinationMap = null;
         var destinationMarker = null;
-        var estimateSummary = document.getElementById('estimateSummary');
         var confirmLocationBtn = document.getElementById('confirmDestinationBtn');
+        var mapPickerTitle = document.getElementById('mapPickerTitle');
         var mapSearchInput = document.getElementById('mapSearchInput');
         var mapSearchResults = document.getElementById('mapSearchResults');
-        var destinationsListEl = document.getElementById('destinationsList');
-        var noDestinationsNote = document.getElementById('noDestinationsNote');
-        var fieldDestinationsJson = document.getElementById('fieldDestinationsJson');
 
-        function resetLocationPickers() {
-            startLocation = null;
-            destinations = [];
-            document.getElementById('fieldStartLocation').value = '';
-            document.getElementById('fieldStartLat').value = '';
-            document.getElementById('fieldStartLng').value = '';
-            renderDestinationsList();
-            estimateSummary.classList.add('hidden');
-            estimateSummary.textContent = '';
+        var ESTIMATE_TONE_CLASSES = {
+            info: ['bg-slate-100', 'text-slate-600', 'dark:bg-slate-800', 'dark:text-slate-300'],
+            error: ['bg-amber-50', 'text-amber-700', 'dark:bg-amber-500/10', 'dark:text-amber-300'],
+            success: ['bg-emerald-50', 'text-emerald-700', 'dark:bg-emerald-500/10', 'dark:text-emerald-300'],
+        };
+
+        function todayIso() {
+            var d = new Date();
+            return d.getFullYear() + '-'
+                + String(d.getMonth() + 1).padStart(2, '0') + '-'
+                + String(d.getDate()).padStart(2, '0');
         }
 
-        function renderDestinationsList() {
-            fieldDestinationsJson.value = JSON.stringify(destinations);
-            noDestinationsNote.classList.toggle('hidden', destinations.length > 0);
-            destinationsListEl.innerHTML = destinations.map(function (d, i) {
+        function escapeHtml(text) {
+            return String(text == null ? '' : text)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function tripByUid(uid) {
+            for (var i = 0; i < trips.length; i++) {
+                if (trips[i].uid === uid) return trips[i];
+            }
+            return null;
+        }
+
+        function cardFor(uid) {
+            return tripsList.querySelector('.js-trip-card[data-trip="' + uid + '"]');
+        }
+
+        function makeTrip(seed) {
+            tripUidCounter += 1;
+            seed = seed || {};
+            return {
+                uid: 't' + tripUidCounter,
+                date: seed.date || todayIso(),
+                startLocation: seed.startLocation || '',
+                startLat: seed.startLat == null ? null : seed.startLat,
+                startLng: seed.startLng == null ? null : seed.startLng,
+                destinations: [],
+                amount: '',
+                estimatedDistanceKm: null,
+                estimatedAmount: null,
+                estimateToken: 0,
+            };
+        }
+
+        /* ------------------------------------------------- rendering
+           Deliberately surgical: only the pieces that actually changed are rewritten. A
+           full renderTrips() rebuild on every keystroke would destroy focus and caret
+           position while someone is typing an Amount. Full rebuild happens only on reset. */
+
+        function appendTripCard(trip) {
+            var frag = tripCardTemplate.content.cloneNode(true);
+            var card = frag.querySelector('.js-trip-card');
+            card.setAttribute('data-trip', trip.uid);
+            card.querySelector('.js-trip-date').value = trip.date;
+            card.querySelector('.js-trip-start').value = trip.startLocation || '';
+            card.querySelector('.js-trip-amount').value = trip.amount || '';
+            tripsList.appendChild(frag);
+            renderTripDestinations(trip.uid);
+            OS.refreshIcons();
+        }
+
+        function renderTripDestinations(uid) {
+            var trip = tripByUid(uid);
+            var card = cardFor(uid);
+            if (!trip || !card) return;
+            var listEl = card.querySelector('.js-trip-destinations');
+            var noneEl = card.querySelector('.js-no-destinations');
+
+            noneEl.classList.toggle('hidden', trip.destinations.length > 0);
+            listEl.innerHTML = trip.destinations.map(function (d, i) {
                 return '<div class="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
-                    + '<span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-50 text-xs font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">' + (i + 1) + '</span>'
-                    + '<span class="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-slate-300">' + d.label.replace(/</g, '&lt;') + '</span>'
-                    + '<button type="button" class="btn btn-icon btn-ghost btn-sm js-remove-destination" data-index="' + i + '" aria-label="Remove destination"><i data-lucide="x" class="h-3.5 w-3.5"></i></button>'
+                    + '<span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-50 text-xs font-semibold '
+                    + 'text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">' + (i + 1) + '</span>'
+                    + '<span class="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-slate-300">'
+                    + escapeHtml(d.label) + '</span>'
+                    + '<button type="button" class="btn btn-icon btn-ghost btn-sm" data-action="remove-destination" '
+                    + 'data-index="' + i + '" aria-label="Remove destination">'
+                    + '<i data-lucide="x" class="h-3.5 w-3.5"></i></button>'
                     + '</div>';
             }).join('');
             OS.refreshIcons();
         }
 
-        destinationsListEl.addEventListener('click', function (e) {
-            var btn = e.target.closest('.js-remove-destination');
+        function renumberTrips() {
+            var cards = tripsList.querySelectorAll('.js-trip-card');
+            cards.forEach(function (card, i) {
+                card.querySelector('.js-trip-number').textContent = i + 1;
+                // Never let the requester delete the only date - a PO must have at least one.
+                card.querySelector('.js-remove-trip').classList.toggle('hidden', cards.length <= 1);
+            });
+        }
+
+        function showTripEstimate(uid, text, tone) {
+            var card = cardFor(uid);
+            if (!card) return;
+            var el = card.querySelector('.js-trip-estimate');
+            el.classList.remove('hidden');
+            el.textContent = text;
+            Object.keys(ESTIMATE_TONE_CLASSES).forEach(function (t) {
+                el.classList.remove.apply(el.classList, ESTIMATE_TONE_CLASSES[t]);
+            });
+            el.classList.add.apply(el.classList, ESTIMATE_TONE_CLASSES[tone || 'info']);
+        }
+
+        /* ------------------------------------------------- serialization + grand total */
+
+        function syncTrips() {
+            fieldTripsJson.value = JSON.stringify(trips.map(function (t) {
+                return {
+                    date: t.date,
+                    startLocation: t.startLocation,
+                    startLat: t.startLat,
+                    startLng: t.startLng,
+                    destinations: t.destinations,
+                    estimatedDistanceKm: t.estimatedDistanceKm,
+                    estimatedAmount: t.estimatedAmount,
+                    amountRequested: t.amount,
+                };
+            }));
+
+            var total = trips.reduce(function (sum, t) {
+                var n = parseFloat(t.amount);
+                return sum + (isFinite(n) && n > 0 ? n : 0);
+            }, 0);
+            fieldAmount.value = total > 0 ? total.toFixed(2) : '';
+            grandTotalDisplay.textContent = '₱' + total.toLocaleString(undefined, {
+                minimumFractionDigits: 2, maximumFractionDigits: 2,
+            });
+        }
+
+        /* ------------------------------------------------- add / remove trips */
+
+        function addTrip() {
+            // A new date starts from wherever the previous one did - most people head out
+            // from the same place each day.
+            var previous = trips.length ? trips[trips.length - 1] : null;
+            var trip = makeTrip(previous ? {
+                startLocation: previous.startLocation,
+                startLat: previous.startLat,
+                startLng: previous.startLng,
+            } : null);
+            trips.push(trip);
+            appendTripCard(trip);
+            renumberTrips();
+            syncTrips();
+            if (trip.startLat != null) fetchEstimateForTrip(trip.uid);
+            return trip;
+        }
+
+        function removeTrip(uid) {
+            var card = cardFor(uid);
+            if (card) card.remove();
+            trips = trips.filter(function (t) { return t.uid !== uid; });
+            renumberTrips();
+            syncTrips();
+        }
+
+        function resetTrips() {
+            trips = [];
+            tripsList.innerHTML = '';
+            addTrip();
+        }
+
+        /* ------------------------------------------------- delegated events
+           One handler set on the container, keyed off data-action, so dynamically added
+           cards need no per-element wiring. */
+
+        tripsList.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-action]');
             if (!btn) return;
-            destinations.splice(parseInt(btn.getAttribute('data-index'), 10), 1);
-            renderDestinationsList();
-            fetchEstimate();
+            var card = btn.closest('.js-trip-card');
+            if (!card) return;
+            var uid = card.getAttribute('data-trip');
+            var action = btn.getAttribute('data-action');
+
+            if (action === 'pick-start') {
+                openLocationPicker('start', uid);
+            } else if (action === 'add-destination') {
+                openLocationPicker('destination', uid);
+            } else if (action === 'remove-destination') {
+                var trip = tripByUid(uid);
+                if (!trip) return;
+                trip.destinations.splice(parseInt(btn.getAttribute('data-index'), 10), 1);
+                renderTripDestinations(uid);
+                syncTrips();
+                fetchEstimateForTrip(uid);
+            } else if (action === 'remove-trip') {
+                removeTrip(uid);
+            } else if (action === 'use-my-location') {
+                useMyLocationFor(uid, btn);
+            }
         });
+
+        tripsList.addEventListener('input', function (e) {
+            var card = e.target.closest('.js-trip-card');
+            if (!card) return;
+            var trip = tripByUid(card.getAttribute('data-trip'));
+            if (!trip) return;
+
+            if (e.target.classList.contains('js-trip-amount')) {
+                // Only the model + total are touched here - re-rendering the card would
+                // yank the caret out of the field mid-typing.
+                trip.amount = e.target.value;
+                syncTrips();
+            } else if (e.target.classList.contains('js-trip-date')) {
+                trip.date = e.target.value;
+                syncTrips();  // the date doesn't affect distance, so no re-estimate
+            }
+        });
+
+        /* ------------------------------------------------- map picker (shared, per-trip) */
 
         function ensureDestinationMap() {
             if (destinationMap) return;
@@ -726,10 +973,14 @@
             confirmLocationBtn.disabled = false;
         }
 
-        function openLocationPicker(target) {
+        function openLocationPicker(target, uid) {
             activeTarget = target;
+            activeTripUid = uid;
             mapSearchInput.value = '';
             mapSearchResults.classList.add('hidden');
+            if (mapPickerTitle) {
+                mapPickerTitle.textContent = target === 'start' ? 'Pick Starting Location' : 'Add Destination';
+            }
             OS.openModal('mapPickerModal');
             ensureDestinationMap();
             if (destinationMarker) {
@@ -738,24 +989,25 @@
             }
             tempPicked = null;
             confirmLocationBtn.disabled = true;
-            // Re-picking "start" shows its current pin; "destination" always starts fresh
-            // since confirming always adds a new stop rather than editing an old one.
-            var existing = target === 'start' ? startLocation : null;
+
+            // Re-picking a start shows its current pin; a destination always starts fresh,
+            // since confirming appends a new stop rather than editing an existing one.
+            var trip = tripByUid(uid);
+            var existing = (target === 'start' && trip && trip.startLat != null)
+                ? { lat: trip.startLat, lng: trip.startLng, label: trip.startLocation }
+                : null;
+            // Leaflet renders a gray box if sized while its container is still hidden.
             setTimeout(function () {
                 destinationMap.invalidateSize();
                 if (existing) setTempLocation(existing.lat, existing.lng, existing.label);
             }, 100);
         }
 
-        document.getElementById('pickStartBtn').addEventListener('click', function () { openLocationPicker('start'); });
-        document.getElementById('addDestinationBtn').addEventListener('click', function () { openLocationPicker('destination'); });
-
-        document.getElementById('useMyLocationBtn').addEventListener('click', function () {
+        function useMyLocationFor(uid, btn) {
             if (!navigator.geolocation) {
-                alert("This browser can't share your location — use \"Pick on Map\" instead.");
+                alert("This browser can't share your location — use \"Map\" instead.");
                 return;
             }
-            var btn = this;
             btn.disabled = true;
             navigator.geolocation.getCurrentPosition(
                 function (pos) {
@@ -763,18 +1015,18 @@
                     fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng)
                         .then(function (r) { return r.json(); })
                         .then(function (result) {
-                            applyStartLocation(lat, lng, (result && result.display_name) || null);
+                            applyStartLocation(uid, lat, lng, (result && result.display_name) || null);
                         })
-                        .catch(function () { applyStartLocation(lat, lng, null); })
+                        .catch(function () { applyStartLocation(uid, lat, lng, null); })
                         .finally(function () { btn.disabled = false; });
                 },
                 function () {
-                    alert("Couldn't get your location (permission denied or unavailable) — use \"Pick on Map\" instead.");
+                    alert("Couldn't get your location (permission denied or unavailable) — use \"Map\" instead.");
                     btn.disabled = false;
                 },
                 { timeout: 10000 }
             );
-        });
+        }
 
         var mapSearchTimeout = null;
         mapSearchInput.addEventListener('input', function () {
@@ -812,79 +1064,123 @@
         });
 
         confirmLocationBtn.addEventListener('click', function () {
-            if (!tempPicked) return;
+            if (!tempPicked || !activeTripUid) return;
+            var uid = activeTripUid;
+            var trip = tripByUid(uid);
+            if (!trip) return;
             OS.closeModal('mapPickerModal');
+
+            var label = tempPicked.label || (tempPicked.lat.toFixed(5) + ', ' + tempPicked.lng.toFixed(5));
             if (activeTarget === 'start') {
-                applyStartLocation(tempPicked.lat, tempPicked.lng, tempPicked.label);
+                applyStartLocation(uid, tempPicked.lat, tempPicked.lng, tempPicked.label);
             } else {
-                var label = tempPicked.label || (tempPicked.lat.toFixed(5) + ', ' + tempPicked.lng.toFixed(5));
-                destinations.push({ lat: tempPicked.lat, lng: tempPicked.lng, label: label });
-                renderDestinationsList();
-                fetchEstimate();
+                trip.destinations.push({ lat: tempPicked.lat, lng: tempPicked.lng, label: label });
+                renderTripDestinations(uid);
+                syncTrips();
+                fetchEstimateForTrip(uid);
             }
         });
 
-        function applyStartLocation(lat, lng, label) {
-            startLocation = { lat: lat, lng: lng, label: label || (lat.toFixed(5) + ', ' + lng.toFixed(5)) };
-            document.getElementById('fieldStartLocation').value = startLocation.label;
-            document.getElementById('fieldStartLat').value = lat;
-            document.getElementById('fieldStartLng').value = lng;
-            fetchEstimate();
+        function applyStartLocation(uid, lat, lng, label) {
+            var trip = tripByUid(uid);
+            var card = cardFor(uid);
+            if (!trip || !card) return;
+            trip.startLat = lat;
+            trip.startLng = lng;
+            trip.startLocation = label || (lat.toFixed(5) + ', ' + lng.toFixed(5));
+            card.querySelector('.js-trip-start').value = trip.startLocation;
+            syncTrips();
+            fetchEstimateForTrip(uid);
         }
 
-        var ESTIMATE_TONE_CLASSES = {
-            info: ['bg-slate-100', 'text-slate-600', 'dark:bg-slate-800', 'dark:text-slate-300'],
-            error: ['bg-amber-50', 'text-amber-700', 'dark:bg-amber-500/10', 'dark:text-amber-300'],
-            success: ['bg-emerald-50', 'text-emerald-700', 'dark:bg-emerald-500/10', 'dark:text-emerald-300'],
-        };
+        /* ------------------------------------------------- per-trip estimates */
 
-        function showEstimateMessage(text, tone) {
-            estimateSummary.classList.remove('hidden');
-            estimateSummary.textContent = text;
-            Object.keys(ESTIMATE_TONE_CLASSES).forEach(function (t) {
-                estimateSummary.classList.remove.apply(estimateSummary.classList, ESTIMATE_TONE_CLASSES[t]);
-            });
-            estimateSummary.classList.add.apply(estimateSummary.classList, ESTIMATE_TONE_CLASSES[tone || 'info']);
-        }
-
-        function fetchEstimate() {
-            if (!vehicleSelect.value) {
-                estimateSummary.classList.add('hidden');
-                return;
-            }
-            if (!startLocation || destinations.length === 0) {
-                showEstimateMessage('Add a starting location and at least one destination to see an estimate.', 'info');
+        function fetchEstimateForTrip(uid) {
+            var trip = tripByUid(uid);
+            if (!trip) return;
+            if (!vehicleSelect.value) return;
+            if (trip.startLat == null || trip.destinations.length === 0) {
+                showTripEstimate(uid, 'Add a starting location and at least one destination to see an estimate.', 'info');
                 return;
             }
 
-            showEstimateMessage('Calculating estimate…', 'info');
+            // A monotonic token per trip: a response whose token is stale (because the user
+            // changed this trip again while it was in flight) is discarded rather than
+            // written into a card it no longer describes.
+            trip.estimateToken += 1;
+            var token = trip.estimateToken;
+            var tripKey = uid + ':' + token;
+
+            showTripEstimate(uid, 'Calculating estimate…', 'info');
 
             var body = new URLSearchParams();
+            body.set('tripKey', tripKey);
             body.set('vehicleId', vehicleSelect.value);
-            body.set('startLat', startLocation.lat);
-            body.set('startLng', startLocation.lng);
+            body.set('startLat', trip.startLat);
+            body.set('startLng', trip.startLng);
             body.set('fuelEfficiencyKmPerLiter', fuelEfficiencyInput.value);
-            body.set('destinationsJson', JSON.stringify(destinations));
+            body.set('destinationsJson', JSON.stringify(trip.destinations));
 
             fetch("{{ url_for('main.fuel_po_estimate') }}", { method: 'POST', body: body })
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
+                    var live = tripByUid(uid);
+                    if (!live || data.tripKey !== uid + ':' + live.estimateToken) return; // stale
                     if (data.error) {
-                        showEstimateMessage(data.error, 'error');
-                        document.getElementById('fieldEstimatedDistanceKm').value = '';
-                        document.getElementById('fieldEstimatedAmount').value = '';
+                        showTripEstimate(uid, data.error, 'error');
+                        live.estimatedDistanceKm = null;
+                        live.estimatedAmount = null;
+                        syncTrips();
                         return;
                     }
-                    showEstimateMessage('~' + data.distanceKm + ' km total · ~' + data.liters
-                        + ' L needed · Estimated ₱' + data.estimatedAmount.toFixed(2) + ' at ₱' + data.pricePerLiter.toFixed(2) + '/L', 'success');
-                    document.getElementById('fieldEstimatedDistanceKm').value = data.distanceKm;
-                    document.getElementById('fieldEstimatedAmount').value = data.estimatedAmount;
-                    document.getElementById('fieldAmount').value = data.estimatedAmount.toFixed(2);
+                    showTripEstimate(uid, '~' + data.distanceKm + ' km · ~' + data.liters
+                        + ' L · Estimated ₱' + data.estimatedAmount.toFixed(2)
+                        + ' at ₱' + data.pricePerLiter.toFixed(2) + '/L', 'success');
+                    live.estimatedDistanceKm = data.distanceKm;
+                    live.estimatedAmount = data.estimatedAmount;
+                    // Suggest the amount, but never overwrite a figure the requester typed.
+                    if (!live.amount) {
+                        live.amount = data.estimatedAmount.toFixed(2);
+                        var card = cardFor(uid);
+                        if (card) card.querySelector('.js-trip-amount').value = live.amount;
+                    }
+                    syncTrips();
                 })
                 .catch(function () {
-                    showEstimateMessage("Couldn't reach the server to estimate — enter the amount manually.", 'error');
+                    showTripEstimate(uid, "Couldn't reach the server to estimate — enter the amount manually.", 'error');
                 });
         }
+
+        function estimateAllTrips() {
+            trips.forEach(function (t) { fetchEstimateForTrip(t.uid); });
+        }
+
+        document.getElementById('addTripBtn').addEventListener('click', function () { addTrip(); });
+
+        /* ------------------------------------------------- submit-time validation */
+
+        recordForm.addEventListener('submit', function (e) {
+            if (!trips.length) {
+                e.preventDefault();
+                alert('Add at least one date before submitting.');
+                return;
+            }
+            for (var i = 0; i < trips.length; i++) {
+                var t = trips[i], n = i + 1;
+                if (!t.date) {
+                    e.preventDefault(); alert('Date ' + n + ' needs a travel date.'); return;
+                }
+                if (t.startLat == null) {
+                    e.preventDefault(); alert('Date ' + n + ' needs a starting location.'); return;
+                }
+                if (!t.destinations.length) {
+                    e.preventDefault(); alert('Date ' + n + ' needs at least one destination.'); return;
+                }
+                if (!(parseFloat(t.amount) > 0)) {
+                    e.preventDefault(); alert('Date ' + n + ' needs an amount.'); return;
+                }
+            }
+        });
 
         /* ------------------------------------------------------------- add */
         document.getElementById('addNewBtn').addEventListener('click', function () {
@@ -895,7 +1191,7 @@
             otherUserPicker.reset();
             approverPicker.reset();
             renderVehicleOptions();
-            resetLocationPickers();
+            resetTrips();
             OS.openModal('recordModal');
         });
 
@@ -903,14 +1199,61 @@
         var viewFields = {
             viewRequestedFor: 'requested-for-name', viewRequestedBy: 'requested-by-name',
             viewRequestDate: 'request-date', viewStatus: 'status', viewFuelType: 'fuel-type',
-            viewStartLocation: 'start-location', viewDestination: 'destination', viewPurpose: 'purpose',
+            viewPurpose: 'purpose',
             viewApprover: 'approver-name', viewFinalApprover: 'final-approver-name'
         };
+
+        function renderViewTrips(row) {
+            var wrap = document.getElementById('viewTrips');
+            var poTrips = [];
+            try {
+                poTrips = JSON.parse(row.getAttribute('data-trips') || '[]');
+            } catch (err) {
+                poTrips = [];
+            }
+
+            // Legacy POs migrated from the old system have one trip with no coordinates and
+            // a free-text itinerary; the same renderer covers them, just with fewer lines.
+            if (!poTrips.length) {
+                wrap.innerHTML = '<p class="text-slate-700 dark:text-slate-300">'
+                    + escapeHtml(row.getAttribute('data-destination') || '—') + '</p>';
+                return;
+            }
+
+            wrap.innerHTML = poTrips.map(function (t, i) {
+                var stops = (t.stops && t.stops.length)
+                    ? t.stops.map(function (s, si) {
+                        return '<li class="flex gap-2"><span class="text-slate-400">' + (si + 1)
+                            + '.</span><span class="min-w-0 flex-1">' + escapeHtml(s) + '</span></li>';
+                    }).join('')
+                    : '<li class="text-slate-500 dark:text-slate-400">' + escapeHtml(t.destination || '—') + '</li>';
+
+                var meta = [];
+                if (t.distanceKm != null) meta.push('~' + t.distanceKm + ' km');
+                if (t.amount != null) {
+                    meta.push('₱' + Number(t.amount).toLocaleString(undefined, { minimumFractionDigits: 2 }));
+                }
+
+                return '<div class="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
+                    + '<div class="mb-1 flex items-center justify-between gap-2">'
+                    + '<span class="text-xs font-semibold text-slate-900 dark:text-white">'
+                    + (poTrips.length > 1 ? 'Date ' + (i + 1) + ' · ' : '') + escapeHtml(t.date || '—') + '</span>'
+                    + (meta.length ? '<span class="text-xs text-slate-500 dark:text-slate-400">' + meta.join(' · ') + '</span>' : '')
+                    + '</div>'
+                    + (t.startLocation
+                        ? '<p class="mb-1 truncate text-xs text-slate-500 dark:text-slate-400">From: '
+                          + escapeHtml(t.startLocation) + '</p>'
+                        : '')
+                    + '<ul class="space-y-0.5 text-xs text-slate-700 dark:text-slate-300">' + stops + '</ul>'
+                    + '</div>';
+            }).join('');
+        }
 
         function openView(row) {
             Object.keys(viewFields).forEach(function (elId) {
                 document.getElementById(elId).textContent = row.getAttribute('data-' + viewFields[elId]) || '—';
             });
+            renderViewTrips(row);
             var plate = row.getAttribute('data-vehicle-plate'), model = row.getAttribute('data-vehicle-model');
             document.getElementById('viewVehicle').textContent = plate ? (plate + (model ? ' — ' + model : '')) : '—';
             var odometer = row.getAttribute('data-odometer');

@@ -26,12 +26,19 @@ def _filter_clauses(search, status):
         sql += " AND fp.status = %s"
         params.append(status)
     if search:
+        # The per-trip EXISTS matters: fp.destination is a single VARCHAR(255) rollup of
+        # every trip's itinerary, so on a multi-date PO the tail gets clipped and those
+        # stops would silently stop being findable. Each trip's own summary is far shorter.
         sql += """ AND (
             reqFor.name LIKE %s OR reqBy.name LIKE %s OR v.plateNumber LIKE %s
             OR fp.destination LIKE %s OR fp.purpose LIKE %s OR CAST(fp.id AS CHAR) LIKE %s
+            OR EXISTS (
+                SELECT 1 FROM tbl_fuel_po_trips t
+                WHERE t.fuelPoId = fp.id AND t.destination LIKE %s
+            )
         )"""
         like = "%" + search + "%"
-        params += [like, like, like, like, like, like]
+        params += [like, like, like, like, like, like, like]
     return sql, params
 
 
@@ -77,8 +84,19 @@ def get_fuel_po(po_id):
 
 
 def create_fuel_po(data, created_by):
+    """Insert the PO, its dated trips, and each trip's stops - in one transaction.
+
+    This is the only place in the codebase that opens an explicit transaction, and the
+    only place that needs one: every other repo function writes exactly one row, where
+    autocommit IS the transaction. Here the PO row carries rollups (amountRequested,
+    estimatedAmount, destination) computed from the trips BEFORE those trips exist as
+    rows, so a failure partway through autocommit would leave a permanently wrong total -
+    a PO approved for an amount whose trips were never saved, with nothing that would
+    ever detect the drift.
+    """
     conn = get_connection()
     try:
+        conn.begin()
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -120,18 +138,104 @@ def create_fuel_po(data, created_by):
             )
             fuel_po_id = cur.lastrowid
 
-            for i, dest in enumerate(data["destinations"], start=1):
+            for trip_seq, trip in enumerate(data["trips"], start=1):
                 cur.execute(
                     """
-                    INSERT INTO tbl_fuel_po_destinations (fuelPoId, sequence, destination, destinationLat, destinationLng)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO tbl_fuel_po_trips
+                        (fuelPoId, sequence, tripDate, startLocation, startLat, startLng,
+                         destination, estimatedDistanceKm, estimatedAmount, amountRequested)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (fuel_po_id, i, dest["label"], dest["lat"], dest["lng"]),
+                    (
+                        fuel_po_id,
+                        trip_seq,
+                        trip["date"],
+                        trip["startLocation"],
+                        trip["startLat"],
+                        trip["startLng"],
+                        trip["destination"],
+                        trip["estimatedDistanceKm"],
+                        trip["estimatedAmount"],
+                        trip["amountRequested"],
+                    ),
                 )
+                trip_id = cur.lastrowid
 
-            return fuel_po_id
+                # sequence restarts at 1 within each trip
+                for stop_seq, dest in enumerate(trip["destinations"], start=1):
+                    cur.execute(
+                        """
+                        INSERT INTO tbl_fuel_po_destinations
+                            (fuelPoId, tripId, sequence, destination, destinationLat, destinationLng)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        (fuel_po_id, trip_id, stop_seq, dest["label"], dest["lat"], dest["lng"]),
+                    )
+
+        conn.commit()
+        return fuel_po_id
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
+
+
+def list_trips_for_fuel_pos(po_ids):
+    """Every trip (with its ordered stops attached) for a page of Fuel POs, keyed by
+    fuelPoId. Always exactly two queries no matter how many POs are on the page - the
+    list renders 30 at a time and must not fan out into per-row lookups.
+
+    Returns {fuelPoId: [{<trip row>, "destinations": [<dest row>, ...]}, ...]}, trips in
+    `sequence` order and each trip's stops in their own `sequence` order. A PO id with no
+    trips is simply absent from the dict.
+    """
+    po_ids = [int(i) for i in po_ids]  # coerce BEFORE interpolating placeholders
+    if not po_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(po_ids))
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT * FROM tbl_fuel_po_trips
+                WHERE fuelPoId IN ({placeholders})
+                ORDER BY fuelPoId ASC, sequence ASC
+                """,
+                po_ids,
+            )
+            trips = cur.fetchall()
+
+            # Filtered on the destinations table's own fuelPoId rather than joined through
+            # trips - that denormalized column is exactly why it was kept.
+            cur.execute(
+                f"""
+                SELECT * FROM tbl_fuel_po_destinations
+                WHERE fuelPoId IN ({placeholders})
+                ORDER BY tripId ASC, sequence ASC
+                """,
+                po_ids,
+            )
+            destinations = cur.fetchall()
+    finally:
+        conn.close()
+
+    stops_by_trip = {}
+    for dest in destinations:
+        stops_by_trip.setdefault(dest["tripId"], []).append(dest)
+
+    trips_by_po = {}
+    for trip in trips:
+        trip["destinations"] = stops_by_trip.get(trip["id"], [])
+        trips_by_po.setdefault(trip["fuelPoId"], []).append(trip)
+    return trips_by_po
+
+
+def get_trips_for_fuel_po(po_id):
+    """One PO's trips - thin wrapper so single-record callers don't build a list."""
+    return list_trips_for_fuel_pos([po_id]).get(int(po_id), [])
 
 
 def soft_delete_fuel_po(po_id, updated_by):
