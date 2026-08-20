@@ -84,13 +84,13 @@ def create_fuel_po(data, created_by):
                 """
                 INSERT INTO tbl_fuel_pos
                     (requestDate, requestedForUserId, requestedByUserId, startLocation, startLat, startLng,
-                     vehicleId, fuelType,
+                     vehicleId, fuelType, fuelEfficiencyKmPerLiter,
                      destination, destinationLat, destinationLng, estimatedDistanceKm, estimatedAmount,
                      purpose, odometer, odometerAttachmentPath, amountRequested,
                      approverUserId, status, isDeleted, createdBy, createdAt, updatedBy, updatedAt)
                 VALUES
                     (CURDATE(), %s, %s, %s, %s, %s,
-                     %s, %s,
+                     %s, %s, %s,
                      %s, %s, %s, %s, %s,
                      %s, %s, %s, %s,
                      %s, 'Pending Approval', 0, %s, NOW(), %s, NOW())
@@ -103,6 +103,7 @@ def create_fuel_po(data, created_by):
                     data["startLng"],
                     data["vehicleId"],
                     data["fuelType"],
+                    data["fuelEfficiencyKmPerLiter"],
                     data["destination"],
                     data["destinationLat"],
                     data["destinationLng"],
@@ -117,7 +118,18 @@ def create_fuel_po(data, created_by):
                     created_by,
                 ),
             )
-            return cur.lastrowid
+            fuel_po_id = cur.lastrowid
+
+            for i, dest in enumerate(data["destinations"], start=1):
+                cur.execute(
+                    """
+                    INSERT INTO tbl_fuel_po_destinations (fuelPoId, sequence, destination, destinationLat, destinationLng)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (fuel_po_id, i, dest["label"], dest["lat"], dest["lng"]),
+                )
+
+            return fuel_po_id
     finally:
         conn.close()
 

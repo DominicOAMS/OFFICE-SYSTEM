@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 from functools import wraps
@@ -693,9 +694,7 @@ def fuel_approvers_remove(approver_id):
 @main_bp.route("/page/parameters_fuel_prices")
 @login_required
 def fuel_prices():
-    return render_template(
-        "fuel_prices.html", prices=fuel_prices_repo.list_prices(), origin=fuel_prices_repo.get_origin()
-    )
+    return render_template("fuel_prices.html", prices=fuel_prices_repo.list_prices())
 
 
 @main_bp.route("/page/parameters_fuel_prices/update-price", methods=["POST"])
@@ -713,26 +712,6 @@ def fuel_prices_update_price():
 
     fuel_prices_repo.update_price(fuel_category, price, updated_by=session.get("user_id"))
     flash(f"{fuel_category} price updated.", "success")
-    return redirect(url_for("main.fuel_prices"))
-
-
-@main_bp.route("/page/parameters_fuel_prices/update-origin", methods=["POST"])
-@login_required
-def fuel_prices_update_origin():
-    address = request.form.get("originAddress", "").strip()
-    lat = request.form.get("originLat", "").strip()
-    lng = request.form.get("originLng", "").strip()
-    if not address or not lat or not lng:
-        flash("Search for an address and confirm its location on the map first.", "error")
-        return redirect(url_for("main.fuel_prices"))
-
-    try:
-        fuel_prices_repo.update_origin(address, float(lat), float(lng), updated_by=session.get("user_id"))
-    except ValueError:
-        flash("Couldn't read that location — try searching again.", "error")
-        return redirect(url_for("main.fuel_prices"))
-
-    flash("Trip origin updated.", "success")
     return redirect(url_for("main.fuel_prices"))
 
 
@@ -766,6 +745,27 @@ def _parse_coordinate(value):
         return None
 
 
+def _parse_destinations(raw_json):
+    try:
+        parsed = json.loads(raw_json or "[]")
+    except ValueError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+
+    destinations = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        lat = _parse_coordinate(str(item.get("lat", "")))
+        lng = _parse_coordinate(str(item.get("lng", "")))
+        label = (item.get("label") or "").strip()
+        if lat is None or lng is None or not label:
+            continue
+        destinations.append({"label": label, "lat": lat, "lng": lng})
+    return destinations
+
+
 def _parse_fuel_po_form():
     other_user_id = request.form.get("otherUserId", "").strip()
     requested_for_user_id = (
@@ -776,6 +776,8 @@ def _parse_fuel_po_form():
     vehicle_id = request.form.get("vehicleId", "").strip()
     approver_user_id = request.form.get("approverUserId", "").strip()
     odometer = request.form.get("odometer", "").strip()
+    fuel_efficiency = request.form.get("fuelEfficiencyKmPerLiter", "").strip()
+    destinations = _parse_destinations(request.form.get("destinationsJson"))
     return {
         "requestedForUserId": requested_for_user_id,
         "requestedByUserId": session.get("user_id"),
@@ -784,9 +786,11 @@ def _parse_fuel_po_form():
         "startLng": _parse_coordinate(request.form.get("startLng", "").strip()),
         "vehicleId": int(vehicle_id) if vehicle_id.isdigit() else None,
         "fuelType": request.form.get("fuelType", "").strip() or None,
-        "destination": request.form.get("destination", "").strip() or None,
-        "destinationLat": _parse_coordinate(request.form.get("destinationLat", "").strip()),
-        "destinationLng": _parse_coordinate(request.form.get("destinationLng", "").strip()),
+        "fuelEfficiencyKmPerLiter": _parse_coordinate(fuel_efficiency),
+        "destinations": destinations,
+        "destination": " → ".join(d["label"] for d in destinations) or None,
+        "destinationLat": None,
+        "destinationLng": None,
         "estimatedDistanceKm": _parse_coordinate(request.form.get("estimatedDistanceKm", "").strip()),
         "estimatedAmount": _parse_money(request.form.get("estimatedAmount")),
         "purpose": request.form.get("purpose", "").strip() or None,
@@ -827,7 +831,6 @@ def fuel_po():
         users=users_repo.list_active_users(),
         approvers=fuel_approvers_repo.list_approvers(),
         final_approver_ids={a["userId"] for a in fuel_approvers_repo.list_final_approvers()},
-        default_origin=fuel_prices_repo.get_origin(),
         search=search,
         status=status,
         page=page,
@@ -843,18 +846,18 @@ def fuel_po_estimate():
     vehicle_id = request.form.get("vehicleId", "").strip()
     start_lat = _parse_coordinate(request.form.get("startLat", "").strip())
     start_lng = _parse_coordinate(request.form.get("startLng", "").strip())
-    dest_lat = _parse_coordinate(request.form.get("destinationLat", "").strip())
-    dest_lng = _parse_coordinate(request.form.get("destinationLng", "").strip())
+    efficiency = _parse_coordinate(request.form.get("fuelEfficiencyKmPerLiter", "").strip())
+    destinations = _parse_destinations(request.form.get("destinationsJson"))
 
     vehicle = vehicles_repo.get_vehicle(int(vehicle_id)) if vehicle_id.isdigit() else None
     if not vehicle:
         return {"error": "Select a vehicle first."}, 400
     if start_lat is None or start_lng is None:
         return {"error": "Pick a starting location first."}, 400
-    if dest_lat is None or dest_lng is None:
-        return {"error": "Pick a destination on the map first."}, 400
-    if not vehicle["fuelEfficiencyKmPerLiter"]:
-        return {"error": "This vehicle doesn't have a fuel efficiency set yet — add one in Parameters > Vehicles."}, 200
+    if not destinations:
+        return {"error": "Add at least one destination first."}, 400
+    if not efficiency or efficiency <= 0:
+        return {"error": "Enter your vehicle's fuel efficiency (km/L) to see an estimate."}, 200
     if not vehicle["fuelPriceCategory"]:
         return {"error": "This vehicle doesn't have a fuel price category set yet — set one in Parameters > Vehicles."}, 200
 
@@ -864,11 +867,12 @@ def fuel_po_estimate():
             "error": f'No price set for {vehicle["fuelPriceCategory"]} yet — set one in Parameters > Fuel Prices.'
         }, 200
 
-    distance_km = routing.get_driving_distance_km(start_lat, start_lng, dest_lat, dest_lng)
+    waypoints = [(start_lat, start_lng)] + [(d["lat"], d["lng"]) for d in destinations]
+    distance_km = routing.get_route_distance_km(waypoints)
     if distance_km is None:
         return {"error": "Couldn't calculate a route between those locations — enter the amount manually."}, 200
 
-    liters = round(distance_km / float(vehicle["fuelEfficiencyKmPerLiter"]), 2)
+    liters = round(distance_km / efficiency, 2)
     price_per_liter = float(price_row["pricePerLiter"])
     estimated_amount = round(liters * price_per_liter, 2)
 
@@ -884,8 +888,8 @@ def fuel_po_estimate():
 @login_required
 def fuel_po_add():
     data = _parse_fuel_po_form()
-    if not data["vehicleId"] or not data["approverUserId"] or not data["destination"] or not data["amountRequested"]:
-        flash("Vehicle, Destination, Amount, and Approver are required.", "error")
+    if not data["vehicleId"] or not data["approverUserId"] or not data["destinations"] or not data["amountRequested"]:
+        flash("Vehicle, at least one Destination, Amount, and Approver are required.", "error")
         return redirect(url_for("main.fuel_po"))
 
     try:

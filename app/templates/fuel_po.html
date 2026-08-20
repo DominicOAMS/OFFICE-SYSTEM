@@ -266,13 +266,11 @@
                             <input type="radio" class="checkbox" name="requestFor" value="other" id="requestForOther"> Another user
                         </label>
                     </div>
-                    <div id="otherUserWrap" class="hidden mt-2">
-                        <select class="input" id="fieldOtherUserId" name="otherUserId">
-                            <option value="">Select a user…</option>
-                            {% for u in users %}
-                            <option value="{{ u.id }}">{{ u.name }}</option>
-                            {% endfor %}
-                        </select>
+                    <div id="otherUserWrap" class="relative hidden mt-2" data-dropdown>
+                        <input type="text" class="input" id="otherUserSearchInput" placeholder="Type a name…" autocomplete="off">
+                        <input type="hidden" id="fieldOtherUserId" name="otherUserId">
+                        <div data-dropdown-panel id="otherUserOptions"
+                             class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
                     </div>
                 </div>
 
@@ -291,8 +289,9 @@
                         <p class="help">Set automatically from the selected vehicle.</p>
                     </div>
                     <div>
-                        <label class="label" for="fieldAmount">Amount (₱) <span class="text-accent-600">*</span></label>
-                        <input type="number" class="input" id="fieldAmount" name="amountRequested" min="0" step="0.01" required>
+                        <label class="label" for="fieldFuelEfficiency">Fuel Efficiency (km/L) <span class="text-accent-600">*</span></label>
+                        <input type="number" class="input" id="fieldFuelEfficiency" name="fuelEfficiencyKmPerLiter" min="0.1" step="0.1" placeholder="e.g. 10" required>
+                        <p class="help">Pre-filled from the vehicle if known — adjust if your actual mileage differs.</p>
                     </div>
                 </div>
 
@@ -313,19 +312,21 @@
                 </div>
 
                 <div>
-                    <label class="label" for="fieldDestination">Destination <span class="text-accent-600">*</span></label>
-                    <div class="flex gap-2">
-                        <input type="text" class="input flex-1 cursor-not-allowed bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400"
-                               id="fieldDestination" name="destination" required readonly placeholder="Where are you going?">
-                        <button type="button" class="btn btn-secondary shrink-0" id="pickDestinationBtn">
-                            <i data-lucide="map-pin" class="h-4 w-4"></i>Pick on Map
-                        </button>
-                    </div>
-                    <input type="hidden" id="fieldDestinationLat" name="destinationLat">
-                    <input type="hidden" id="fieldDestinationLng" name="destinationLng">
+                    <label class="label">Destinations <span class="text-accent-600">*</span></label>
+                    <div id="destinationsList" class="mb-2 space-y-2"></div>
+                    <p class="hidden text-sm text-slate-400 dark:text-slate-500" id="noDestinationsNote">No destinations added yet.</p>
+                    <button type="button" class="btn btn-secondary btn-sm" id="addDestinationBtn">
+                        <i data-lucide="plus" class="h-3.5 w-3.5"></i>Add Destination
+                    </button>
+                    <input type="hidden" id="fieldDestinationsJson" name="destinationsJson">
                     <input type="hidden" id="fieldEstimatedDistanceKm" name="estimatedDistanceKm">
                     <input type="hidden" id="fieldEstimatedAmount" name="estimatedAmount">
-                    <p class="help hidden" id="estimateSummary"></p>
+                    <p class="hidden mt-2 rounded-lg px-3 py-2 text-sm" id="estimateSummary"></p>
+                </div>
+
+                <div>
+                    <label class="label" for="fieldAmount">Amount (₱) <span class="text-accent-600">*</span></label>
+                    <input type="number" class="input" id="fieldAmount" name="amountRequested" min="0" step="0.01" required>
                 </div>
                 <div>
                     <label class="label" for="fieldPurpose">Purpose</label>
@@ -349,13 +350,13 @@
                 </div>
 
                 <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
-                    <label class="label" for="fieldApproverUserId">Approver <span class="text-accent-600">*</span></label>
-                    <select class="input" id="fieldApproverUserId" name="approverUserId" required>
-                        <option value="" disabled selected>Select an approver…</option>
-                        {% for a in approvers %}
-                        <option value="{{ a.userId }}">{{ a.name }}</option>
-                        {% endfor %}
-                    </select>
+                    <label class="label" for="approverSearchInput">Approver <span class="text-accent-600">*</span></label>
+                    <div class="relative" data-dropdown>
+                        <input type="text" class="input" id="approverSearchInput" placeholder="Type an approver's name…" autocomplete="off" required>
+                        <input type="hidden" id="fieldApproverUserId" name="approverUserId">
+                        <div data-dropdown-panel id="approverOptions"
+                             class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                    </div>
                     <p class="help">They'll approve first; a Final Approver then gives final sign-off.</p>
                 </div>
             </div>
@@ -480,7 +481,7 @@
             <div class="relative">
                 <i data-lucide="search" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
                 <input type="text" class="input pl-9" id="mapSearchInput" placeholder="Search for a place or address…" autocomplete="off">
-                <div id="mapSearchResults" class="hidden absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                <div id="mapSearchResults" class="hidden absolute z-[1200] mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
             </div>
             <div id="destinationMap" class="h-72 w-full rounded-xl border border-slate-200 dark:border-slate-700"></div>
             <p class="help">Search above, or click anywhere on the map to drop a pin.</p>
@@ -500,9 +501,89 @@
     (function () {
         var CURRENT_USER_ID = {{ (session.get('user_id') or 0)|tojson }};
         var VEHICLES = {{ vehicles|tojson }};
+        var USERS = {{ users|tojson }};
+        var APPROVERS = {{ approvers|tojson }};
 
         var recordForm = document.getElementById('recordForm');
         var tbody = document.getElementById('recordsBody');
+
+        /* ------------------------------------------------- searchable name pickers */
+        // Type-to-filter combobox: visible text input + hidden input carrying the real
+        // value, using this app's established [data-dropdown] contract (main.js handles
+        // close-on-outside-click; typing/clicking here force-opens + re-filters, same
+        // recipe as the supplier/customer catalog pickers).
+        var searchablePanels = [];
+
+        function closeAllOtherDropdowns(exceptPanel) {
+            searchablePanels.forEach(function (p) {
+                if (p !== exceptPanel) p.classList.add('hidden');
+            });
+        }
+
+        function initSearchablePicker(inputId, hiddenId, panelId, items, getId, getLabel) {
+            var input = document.getElementById(inputId);
+            var hidden = document.getElementById(hiddenId);
+            var panel = document.getElementById(panelId);
+            searchablePanels.push(panel);
+
+            function render(filterText) {
+                var term = (filterText || '').trim().toLowerCase();
+                var matches = items.filter(function (item) {
+                    return !term || getLabel(item).toLowerCase().indexOf(term) !== -1;
+                });
+                panel.innerHTML = matches.length
+                    ? matches.map(function (item) {
+                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-id="'
+                            + getId(item) + '" data-name="' + getLabel(item).replace(/"/g, '&quot;') + '">' + getLabel(item) + '</button>';
+                    }).join('')
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matches</p>';
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-id]');
+                if (!btn) return;
+                input.value = btn.getAttribute('data-name');
+                hidden.value = btn.getAttribute('data-id');
+                hidden.dispatchEvent(new Event('change'));
+                panel.classList.add('hidden');
+            });
+
+            input.addEventListener('input', function () {
+                hidden.value = '';
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            // A plain click (no typing) must still show the full list, not whatever was
+            // last filtered - same recipe as the existing supplier/customer pickers. This
+            // input deliberately has no data-dropdown-toggle: main.js's own toggle handler
+            // would race with this one (both bound to the same element) and immediately
+            // re-close the panel it just opened. stopPropagation keeps the click from also
+            // reaching the document-level "click anywhere closes all dropdowns" listener.
+            input.addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeAllOtherDropdowns(panel);
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            return {
+                reset: function () {
+                    input.value = '';
+                    hidden.value = '';
+                    render('');
+                },
+            };
+        }
+
+        var otherUserPicker = initSearchablePicker(
+            'otherUserSearchInput', 'fieldOtherUserId', 'otherUserOptions', USERS,
+            function (u) { return u.id; }, function (u) { return u.name; }
+        );
+        var approverPicker = initSearchablePicker(
+            'approverSearchInput', 'fieldApproverUserId', 'approverOptions', APPROVERS,
+            function (a) { return a.userId; }, function (a) { return a.name; }
+        );
 
         /* ------------------------------------------------- request-for toggle */
         var otherUserWrap = document.getElementById('otherUserWrap');
@@ -525,7 +606,8 @@
 
             function optionsFor(list) {
                 return list.map(function (v) {
-                    return '<option value="' + v.id + '" data-fuel-type="' + (v.fuelType || '').replace(/"/g, '&quot;') + '">'
+                    return '<option value="' + v.id + '" data-fuel-type="' + (v.fuelType || '').replace(/"/g, '&quot;')
+                        + '" data-fuel-efficiency="' + (v.fuelEfficiencyKmPerLiter || '') + '">'
                         + v.plateNumber + (v.vehicleModel ? ' — ' + v.vehicleModel : '') + '</option>';
                 }).join('');
             }
@@ -545,11 +627,16 @@
         });
         otherUserSelect.addEventListener('change', renderVehicleOptions);
 
+        var fuelEfficiencyInput = document.getElementById('fieldFuelEfficiency');
+
         vehicleSelect.addEventListener('change', function () {
             var opt = vehicleSelect.options[vehicleSelect.selectedIndex];
             fuelTypeInput.value = (opt && opt.getAttribute('data-fuel-type')) || '';
+            fuelEfficiencyInput.value = (opt && opt.getAttribute('data-fuel-efficiency')) || '';
             fetchEstimate();
         });
+
+        fuelEfficiencyInput.addEventListener('change', fetchEstimate);
 
         /* ------------------------------------------------- attachment preview */
         var attachmentInput = document.getElementById('fieldAttachment');
@@ -566,27 +653,55 @@
             }
         });
 
-        /* ------------------------------------------------- start/destination map picker */
-        // One shared map picker modal serves both "Current Location" and "Destination" -
-        // activeTarget says which pair of fields the next confirm/search pick writes to.
-        var LOCATION_FIELDS = {
-            start: { text: 'fieldStartLocation', lat: 'fieldStartLat', lng: 'fieldStartLng' },
-            destination: { text: 'fieldDestination', lat: 'fieldDestinationLat', lng: 'fieldDestinationLng' }
-        };
-        var pickedLocations = { start: null, destination: null }; // {lat, lng, label} once set
-        var activeTarget = null;
+        /* ------------------------------------------------- start/destination(s) map picker */
+        // One shared map picker modal serves "Current Location" (a single point, re-picking
+        // replaces it) and "Destinations" (a list - each confirm appends a new stop).
+        var startLocation = null;   // {lat, lng, label} or null
+        var destinations = [];      // ordered [{lat, lng, label}, ...], one or more stops
+        var activeTarget = null;    // 'start' | 'destination'
+        var tempPicked = null;      // {lat, lng, label} marked on the open map, before confirm
+
         var destinationMap = null;
         var destinationMarker = null;
         var estimateSummary = document.getElementById('estimateSummary');
         var confirmLocationBtn = document.getElementById('confirmDestinationBtn');
         var mapSearchInput = document.getElementById('mapSearchInput');
         var mapSearchResults = document.getElementById('mapSearchResults');
+        var destinationsListEl = document.getElementById('destinationsList');
+        var noDestinationsNote = document.getElementById('noDestinationsNote');
+        var fieldDestinationsJson = document.getElementById('fieldDestinationsJson');
 
         function resetLocationPickers() {
-            pickedLocations = { start: null, destination: null };
+            startLocation = null;
+            destinations = [];
+            document.getElementById('fieldStartLocation').value = '';
+            document.getElementById('fieldStartLat').value = '';
+            document.getElementById('fieldStartLng').value = '';
+            renderDestinationsList();
             estimateSummary.classList.add('hidden');
             estimateSummary.textContent = '';
         }
+
+        function renderDestinationsList() {
+            fieldDestinationsJson.value = JSON.stringify(destinations);
+            noDestinationsNote.classList.toggle('hidden', destinations.length > 0);
+            destinationsListEl.innerHTML = destinations.map(function (d, i) {
+                return '<div class="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
+                    + '<span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-50 text-xs font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">' + (i + 1) + '</span>'
+                    + '<span class="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-slate-300">' + d.label.replace(/</g, '&lt;') + '</span>'
+                    + '<button type="button" class="btn btn-icon btn-ghost btn-sm js-remove-destination" data-index="' + i + '" aria-label="Remove destination"><i data-lucide="x" class="h-3.5 w-3.5"></i></button>'
+                    + '</div>';
+            }).join('');
+            OS.refreshIcons();
+        }
+
+        destinationsListEl.addEventListener('click', function (e) {
+            var btn = e.target.closest('.js-remove-destination');
+            if (!btn) return;
+            destinations.splice(parseInt(btn.getAttribute('data-index'), 10), 1);
+            renderDestinationsList();
+            fetchEstimate();
+        });
 
         function ensureDestinationMap() {
             if (destinationMap) return;
@@ -596,12 +711,12 @@
                 maxZoom: 19,
             }).addTo(destinationMap);
             destinationMap.on('click', function (e) {
-                setPickedLocation(e.latlng.lat, e.latlng.lng, null);
+                setTempLocation(e.latlng.lat, e.latlng.lng, null);
             });
         }
 
-        function setPickedLocation(lat, lng, label) {
-            pickedLocations[activeTarget] = { lat: lat, lng: lng, label: label };
+        function setTempLocation(lat, lng, label) {
+            tempPicked = { lat: lat, lng: lng, label: label };
             if (destinationMarker) {
                 destinationMarker.setLatLng([lat, lng]);
             } else {
@@ -621,16 +736,19 @@
                 destinationMap.removeLayer(destinationMarker);
                 destinationMarker = null;
             }
+            tempPicked = null;
             confirmLocationBtn.disabled = true;
-            var existing = pickedLocations[target];
+            // Re-picking "start" shows its current pin; "destination" always starts fresh
+            // since confirming always adds a new stop rather than editing an old one.
+            var existing = target === 'start' ? startLocation : null;
             setTimeout(function () {
                 destinationMap.invalidateSize();
-                if (existing) setPickedLocation(existing.lat, existing.lng, existing.label);
+                if (existing) setTempLocation(existing.lat, existing.lng, existing.label);
             }, 100);
         }
 
         document.getElementById('pickStartBtn').addEventListener('click', function () { openLocationPicker('start'); });
-        document.getElementById('pickDestinationBtn').addEventListener('click', function () { openLocationPicker('destination'); });
+        document.getElementById('addDestinationBtn').addEventListener('click', function () { openLocationPicker('destination'); });
 
         document.getElementById('useMyLocationBtn').addEventListener('click', function () {
             if (!navigator.geolocation) {
@@ -645,9 +763,9 @@
                     fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng)
                         .then(function (r) { return r.json(); })
                         .then(function (result) {
-                            applyLocation('start', lat, lng, (result && result.display_name) || null);
+                            applyStartLocation(lat, lng, (result && result.display_name) || null);
                         })
-                        .catch(function () { applyLocation('start', lat, lng, null); })
+                        .catch(function () { applyStartLocation(lat, lng, null); })
                         .finally(function () { btn.disabled = false; });
                 },
                 function () {
@@ -681,7 +799,7 @@
                             item.className = 'block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50';
                             item.textContent = r.display_name;
                             item.addEventListener('click', function () {
-                                setPickedLocation(parseFloat(r.lat), parseFloat(r.lon), r.display_name);
+                                setTempLocation(parseFloat(r.lat), parseFloat(r.lon), r.display_name);
                                 mapSearchResults.classList.add('hidden');
                                 mapSearchInput.value = r.display_name;
                             });
@@ -694,68 +812,90 @@
         });
 
         confirmLocationBtn.addEventListener('click', function () {
-            var picked = pickedLocations[activeTarget];
-            if (!picked) return;
+            if (!tempPicked) return;
             OS.closeModal('mapPickerModal');
-            applyLocation(activeTarget, picked.lat, picked.lng, picked.label);
+            if (activeTarget === 'start') {
+                applyStartLocation(tempPicked.lat, tempPicked.lng, tempPicked.label);
+            } else {
+                var label = tempPicked.label || (tempPicked.lat.toFixed(5) + ', ' + tempPicked.lng.toFixed(5));
+                destinations.push({ lat: tempPicked.lat, lng: tempPicked.lng, label: label });
+                renderDestinationsList();
+                fetchEstimate();
+            }
         });
 
-        function applyLocation(target, lat, lng, label) {
-            pickedLocations[target] = { lat: lat, lng: lng, label: label };
-            var fields = LOCATION_FIELDS[target];
-            document.getElementById(fields.text).value = label || (lat.toFixed(5) + ', ' + lng.toFixed(5));
-            document.getElementById(fields.lat).value = lat;
-            document.getElementById(fields.lng).value = lng;
+        function applyStartLocation(lat, lng, label) {
+            startLocation = { lat: lat, lng: lng, label: label || (lat.toFixed(5) + ', ' + lng.toFixed(5)) };
+            document.getElementById('fieldStartLocation').value = startLocation.label;
+            document.getElementById('fieldStartLat').value = lat;
+            document.getElementById('fieldStartLng').value = lng;
             fetchEstimate();
         }
 
-        function fetchEstimate() {
-            var start = pickedLocations.start, destination = pickedLocations.destination;
-            if (!vehicleSelect.value || !start || !destination) return;
+        var ESTIMATE_TONE_CLASSES = {
+            info: ['bg-slate-100', 'text-slate-600', 'dark:bg-slate-800', 'dark:text-slate-300'],
+            error: ['bg-amber-50', 'text-amber-700', 'dark:bg-amber-500/10', 'dark:text-amber-300'],
+            success: ['bg-emerald-50', 'text-emerald-700', 'dark:bg-emerald-500/10', 'dark:text-emerald-300'],
+        };
 
+        function showEstimateMessage(text, tone) {
             estimateSummary.classList.remove('hidden');
-            estimateSummary.textContent = 'Calculating estimate…';
+            estimateSummary.textContent = text;
+            Object.keys(ESTIMATE_TONE_CLASSES).forEach(function (t) {
+                estimateSummary.classList.remove.apply(estimateSummary.classList, ESTIMATE_TONE_CLASSES[t]);
+            });
+            estimateSummary.classList.add.apply(estimateSummary.classList, ESTIMATE_TONE_CLASSES[tone || 'info']);
+        }
+
+        function fetchEstimate() {
+            if (!vehicleSelect.value) {
+                estimateSummary.classList.add('hidden');
+                return;
+            }
+            if (!startLocation || destinations.length === 0) {
+                showEstimateMessage('Add a starting location and at least one destination to see an estimate.', 'info');
+                return;
+            }
+
+            showEstimateMessage('Calculating estimate…', 'info');
 
             var body = new URLSearchParams();
             body.set('vehicleId', vehicleSelect.value);
-            body.set('startLat', start.lat);
-            body.set('startLng', start.lng);
-            body.set('destinationLat', destination.lat);
-            body.set('destinationLng', destination.lng);
+            body.set('startLat', startLocation.lat);
+            body.set('startLng', startLocation.lng);
+            body.set('fuelEfficiencyKmPerLiter', fuelEfficiencyInput.value);
+            body.set('destinationsJson', JSON.stringify(destinations));
 
             fetch("{{ url_for('main.fuel_po_estimate') }}", { method: 'POST', body: body })
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     if (data.error) {
-                        estimateSummary.textContent = data.error;
+                        showEstimateMessage(data.error, 'error');
                         document.getElementById('fieldEstimatedDistanceKm').value = '';
                         document.getElementById('fieldEstimatedAmount').value = '';
                         return;
                     }
-                    estimateSummary.textContent = '~' + data.distanceKm + ' km one-way · ~' + data.liters
-                        + ' L needed · Estimated ₱' + data.estimatedAmount.toFixed(2) + ' at ₱' + data.pricePerLiter.toFixed(2) + '/L';
+                    showEstimateMessage('~' + data.distanceKm + ' km total · ~' + data.liters
+                        + ' L needed · Estimated ₱' + data.estimatedAmount.toFixed(2) + ' at ₱' + data.pricePerLiter.toFixed(2) + '/L', 'success');
                     document.getElementById('fieldEstimatedDistanceKm').value = data.distanceKm;
                     document.getElementById('fieldEstimatedAmount').value = data.estimatedAmount;
                     document.getElementById('fieldAmount').value = data.estimatedAmount.toFixed(2);
                 })
                 .catch(function () {
-                    estimateSummary.textContent = "Couldn't reach the server to estimate — enter the amount manually.";
+                    showEstimateMessage("Couldn't reach the server to estimate — enter the amount manually.", 'error');
                 });
         }
 
         /* ------------------------------------------------------------- add */
-        var DEFAULT_ORIGIN = {{ default_origin|tojson }};
-
         document.getElementById('addNewBtn').addEventListener('click', function () {
             recordForm.reset();
             document.getElementById('requestForSelf').checked = true;
             otherUserWrap.classList.add('hidden');
             attachmentPreviewWrap.classList.add('hidden');
+            otherUserPicker.reset();
+            approverPicker.reset();
             renderVehicleOptions();
             resetLocationPickers();
-            if (DEFAULT_ORIGIN && DEFAULT_ORIGIN.originLat) {
-                applyLocation('start', parseFloat(DEFAULT_ORIGIN.originLat), parseFloat(DEFAULT_ORIGIN.originLng), DEFAULT_ORIGIN.originAddress);
-            }
             OS.openModal('recordModal');
         });
 
