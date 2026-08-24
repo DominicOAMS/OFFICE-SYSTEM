@@ -26,6 +26,8 @@ from . import (
     fuel_po_repo,
     fuel_prices_repo,
     program_menu_repo,
+    purchase_order_approvers_repo,
+    purchase_orders_repo,
     suppliers_repo,
     users_repo,
     vehicles_repo,
@@ -1162,6 +1164,273 @@ def fuel_po_attachment(po_id):
     if not po or not po["odometerAttachmentPath"]:
         abort(404)
     return send_from_directory(current_app.config["UPLOAD_FOLDER"], po["odometerAttachmentPath"])
+
+
+PURCHASE_ORDER_PER_PAGE = 30
+MAX_ITEMS_PER_PO = 50
+
+
+def _item_for_view(item):
+    """Display-ready primitives for the View modal's line-item breakdown - same reasoning
+    as _trip_for_view: Decimal doesn't serialize the way a human wants via |tojson."""
+    return {
+        "catalogCode": item["catalogCode"],
+        "description": item["description"],
+        "unit": item["unit"],
+        "quantity": float(item["quantity"]) if item["quantity"] is not None else None,
+        "unitCost": float(item["unitCost"]) if item["unitCost"] is not None else None,
+        "amount": float(item["amount"]) if item["amount"] is not None else None,
+        "allocation": item["allocation"],
+    }
+
+
+@main_bp.route("/page/purchase_order_orders")
+@login_required
+def purchase_orders():
+    search = request.args.get("q", "").strip()
+    status = request.args.get("status", "").strip()
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    total = purchase_orders_repo.count_purchase_orders(search or None, status or None)
+    page_count = max(1, -(-total // PURCHASE_ORDER_PER_PAGE))  # ceil
+    page = min(page, page_count)
+
+    records = purchase_orders_repo.list_purchase_orders(
+        search=search or None,
+        status=status or None,
+        limit=PURCHASE_ORDER_PER_PAGE,
+        offset=(page - 1) * PURCHASE_ORDER_PER_PAGE,
+    )
+    items_by_po = {
+        po_id: [_item_for_view(i) for i in items]
+        for po_id, items in purchase_orders_repo.list_items_for_purchase_orders(
+            [r["id"] for r in records]
+        ).items()
+    }
+    return render_template(
+        "purchase_orders.html",
+        purchase_orders=records,
+        items_by_po=items_by_po,
+        suppliers=suppliers_repo.list_active_suppliers(),
+        inventory_items=purchase_orders_repo.list_active_inventory_items(),
+        approvers=purchase_order_approvers_repo.list_approvers(),
+        search=search,
+        status=status,
+        page=page,
+        page_count=page_count,
+        total=total,
+        per_page=PURCHASE_ORDER_PER_PAGE,
+    )
+
+
+def _parse_items(raw_json):
+    """The repeatable line-items payload from the Add form.
+
+    A whole line is DROPPED (not silently patched) when it's missing a description, a
+    positive quantity, or a unit cost - same "drop, don't patch" rule _parse_trips uses,
+    so a malformed payload surfaces as "add at least one item" instead of quietly creating
+    a PO whose total doesn't match what the requester saw on screen. amount is computed
+    here, never trusted from the client.
+    """
+    try:
+        parsed = json.loads(raw_json or "[]")
+    except ValueError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+
+    items = []
+    for entry in parsed[:MAX_ITEMS_PER_PO]:
+        if not isinstance(entry, dict):
+            continue
+        description = _clip((entry.get("description") or "").strip())
+        quantity = _parse_coordinate(str(entry.get("quantity", "")))
+        unit_cost = _parse_coordinate(str(entry.get("unitCost", "")))
+        item_id_raw = str(entry.get("itemId", "")).strip()
+        if not description or quantity is None or quantity <= 0 or unit_cost is None or unit_cost < 0:
+            continue
+        items.append(
+            {
+                "itemId": int(item_id_raw) if item_id_raw.isdigit() else None,
+                "catalogCode": _clip((entry.get("catalogCode") or "").strip()) or None,
+                "description": description,
+                "unit": _clip((entry.get("unit") or "").strip(), limit=30) or None,
+                "quantity": Decimal(str(quantity)),
+                "unitCost": Decimal(str(unit_cost)),
+                "amount": (Decimal(str(quantity)) * Decimal(str(unit_cost))).quantize(Decimal("0.01")),
+                "allocation": (entry.get("allocation") or "").strip() or None,
+            }
+        )
+    return items
+
+
+def _parse_purchase_order_form():
+    supplier_id = request.form.get("supplierId", "").strip()
+    approver_user_id = request.form.get("approverUserId", "").strip()
+    items = _parse_items(request.form.get("itemsJson"))
+
+    supplier = suppliers_repo.get_supplier(int(supplier_id)) if supplier_id.isdigit() else None
+
+    # Money is always derived from items, never trusted from the client - the legacy
+    # migration found stored totals that had drifted from their own line items, which is
+    # exactly the failure mode this avoids. 12% PH VAT, applied on top of a VAT-exclusive
+    # unit cost (standard PO convention: the supplier's quoted price is pre-VAT). Decimal
+    # throughout - item["amount"] is already Decimal, and mixing it with a float here would
+    # raise TypeError.
+    if items:
+        vatable_amount = sum((i["amount"] for i in items), Decimal("0.00"))
+        vat_amount = (vatable_amount * Decimal("0.12")).quantize(Decimal("0.01"))
+        total_amount = vatable_amount + vat_amount
+    else:
+        vatable_amount = vat_amount = total_amount = None
+
+    return {
+        "supplierId": supplier["id"] if supplier else None,
+        "supplierName": supplier["name"] if supplier else None,
+        "supplierAddress": supplier["address"] if supplier else None,
+        "supplierTelephone": supplier["telephoneNumber"] if supplier else None,
+        "supplierFax": supplier["faxNumber"] if supplier else None,
+        "supplierEmail": supplier["email"] if supplier else None,
+        "deliveryAddress": _clip(request.form.get("deliveryAddress", "").strip()) or None,
+        "deliveryTelephone": _clip(request.form.get("deliveryTelephone", "").strip(), limit=100) or None,
+        "deliveryMobileNumber": _clip(request.form.get("deliveryMobileNumber", "").strip(), limit=100) or None,
+        "deliveryTerm": _clip(request.form.get("deliveryTerm", "").strip()) or None,
+        "paymentTerm": _clip(request.form.get("paymentTerm", "").strip()) or None,
+        "deliveryDate": request.form.get("deliveryDate", "").strip() or None,
+        "paymentDueDate": request.form.get("paymentDueDate", "").strip() or None,
+        "vatableAmount": vatable_amount,
+        "vatAmount": vat_amount,
+        "totalAmount": total_amount,
+        "noaNumber": _clip(request.form.get("noaNumber", "").strip()) or None,
+        "notes": _clip(request.form.get("notes", "").strip()) or None,
+        "branch": _clip(request.form.get("branch", "").strip(), limit=100) or None,
+        "approverUserId": int(approver_user_id) if approver_user_id.isdigit() else None,
+        "items": items,
+    }
+
+
+@main_bp.route("/page/purchase_order_orders/add", methods=["POST"])
+@login_required
+def purchase_order_add():
+    data = _parse_purchase_order_form()
+    if not data["supplierId"] or not data["approverUserId"]:
+        flash("Supplier and Approver are required.", "error")
+        return redirect(url_for("main.purchase_orders"))
+    # _parse_items guarantees every surviving item has a description, a positive quantity
+    # and a unit cost, so a non-empty list always rolls up to a non-None total - no
+    # separate totalAmount check needed.
+    if not data["items"]:
+        flash(
+            "Add at least one line item — every item needs a description, quantity, and unit cost.",
+            "error",
+        )
+        return redirect(url_for("main.purchase_orders"))
+
+    try:
+        data["attachmentPath"] = _save_attachment(request.files.get("attachment"))
+    except ValueError as e:
+        flash(str(e), "error")
+        return redirect(url_for("main.purchase_orders"))
+
+    try:
+        _, po_number = purchase_orders_repo.create_purchase_order(data, created_by=session.get("user_id"))
+    except (IntegrityError, DataError):
+        flash(
+            "Could not submit — one of the selected records no longer exists, or a "
+            "value was too long to save.",
+            "error",
+        )
+        return redirect(url_for("main.purchase_orders"))
+
+    flash(f"Purchase Order {po_number} submitted for approval.", "success")
+    return redirect(url_for("main.purchase_orders"))
+
+
+@main_bp.route("/page/purchase_order_orders/<int:po_id>/delete", methods=["POST"])
+@login_required
+def purchase_order_delete(po_id):
+    po = purchase_orders_repo.get_purchase_order(po_id)
+    if not po:
+        abort(404)
+    if po["createdBy"] != session.get("user_id"):
+        abort(403)
+    purchase_orders_repo.soft_delete_purchase_order(po_id, updated_by=session.get("user_id"))
+    flash("Purchase Order deleted.", "success")
+    return redirect(url_for("main.purchase_orders"))
+
+
+@main_bp.route("/page/purchase_order_orders/<int:po_id>/approve", methods=["POST"])
+@login_required
+def purchase_order_approve(po_id):
+    po = purchase_orders_repo.get_purchase_order(po_id)
+    if not po:
+        abort(404)
+    if po["status"] != "Pending Approval" or po["approverUserId"] != session.get("user_id"):
+        abort(403)
+    purchase_orders_repo.approve(
+        po_id, approved_by=session.get("user_id"), remarks=request.form.get("remarks", "").strip() or None
+    )
+    flash("Purchase Order approved.", "success")
+    return redirect(url_for("main.purchase_orders"))
+
+
+@main_bp.route("/page/purchase_order_orders/<int:po_id>/reject", methods=["POST"])
+@login_required
+def purchase_order_reject(po_id):
+    po = purchase_orders_repo.get_purchase_order(po_id)
+    if not po:
+        abort(404)
+    if po["status"] != "Pending Approval" or po["approverUserId"] != session.get("user_id"):
+        abort(403)
+    purchase_orders_repo.reject(
+        po_id, rejected_by=session.get("user_id"), remarks=request.form.get("remarks", "").strip() or None
+    )
+    flash("Purchase Order rejected.", "success")
+    return redirect(url_for("main.purchase_orders"))
+
+
+@main_bp.route("/page/purchase_order_orders/<int:po_id>/attachment")
+@login_required
+def purchase_order_attachment(po_id):
+    po = purchase_orders_repo.get_purchase_order(po_id)
+    if not po or not po["attachmentPath"]:
+        abort(404)
+    return send_from_directory(current_app.config["UPLOAD_FOLDER"], po["attachmentPath"])
+
+
+@main_bp.route("/page/parameters_purchase_order_approvers")
+@login_required
+def purchase_order_approvers():
+    return render_template(
+        "purchase_order_approvers.html",
+        approvers=purchase_order_approvers_repo.list_approvers(),
+        users=users_repo.list_active_users(),
+    )
+
+
+@main_bp.route("/page/parameters_purchase_order_approvers/add", methods=["POST"])
+@login_required
+def purchase_order_approvers_add():
+    user_id = request.form.get("userId", "").strip()
+    if not user_id.isdigit():
+        flash("Choose a user.", "error")
+        return redirect(url_for("main.purchase_order_approvers"))
+
+    purchase_order_approvers_repo.add_approver(int(user_id), created_by=session.get("user_id"))
+    flash("Approver added.", "success")
+    return redirect(url_for("main.purchase_order_approvers"))
+
+
+@main_bp.route("/page/parameters_purchase_order_approvers/<int:approver_id>/remove", methods=["POST"])
+@login_required
+def purchase_order_approvers_remove(approver_id):
+    purchase_order_approvers_repo.remove_approver(approver_id, updated_by=session.get("user_id"))
+    flash("Removed.", "success")
+    return redirect(url_for("main.purchase_order_approvers"))
 
 
 @main_bp.route("/page/<slug>")

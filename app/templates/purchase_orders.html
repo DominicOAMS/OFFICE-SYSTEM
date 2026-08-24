@@ -1,0 +1,945 @@
+{% extends "base.html" %}
+
+{% block title %}Purchase Orders - Office System{% endblock %}
+
+{% block content %}
+{% set STATUS_TONE = {
+    'Draft': 'badge-slate',
+    'Pending Approval': 'badge-warning',
+    'Approved': 'badge-success',
+    'Rejected': 'badge-accent'
+} %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="file-text" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Purchase Orders</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    Raise a Purchase Order against a supplier and track its approval.
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Add Purchase Order
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="file-text" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Purchase Order Requests
+            </h2>
+            <div class="flex items-center gap-2">
+                <form method="GET" action="{{ url_for('main.purchase_orders') }}" class="relative" id="searchForm">
+                    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" id="poSearch" value="{{ search }}"
+                           placeholder="Search PO #, supplier, branch, item…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </form>
+                <span class="badge badge-slate whitespace-nowrap">{{ '{:,}'.format(total) }} shown</span>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+            {% for value, label in [
+                ('', 'All'),
+                ('Pending Approval', 'Pending Approval'),
+                ('Approved', 'Approved'),
+                ('Rejected', 'Rejected')
+            ] %}
+            <a href="{{ url_for('main.purchase_orders', q=search or None, status=value or None) }}"
+               class="badge {{ 'bg-accent-600 text-white ring-0' if status == value else 'badge-slate' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[64rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th w-28">PO #</th>
+                        <th class="table-th w-24">Date</th>
+                        <th class="table-th">Supplier</th>
+                        <th class="table-th w-28">Branch</th>
+                        <th class="table-th w-28">Total</th>
+                        <th class="table-th w-40">Status</th>
+                        <th class="table-th w-28 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for po in purchase_orders %}
+                    <tr class="table-row"
+                        data-id="{{ po.id }}"
+                        data-po-number="{{ po.poNumber }}"
+                        data-order-date="{{ po.orderDate or '' }}"
+                        data-supplier-name="{{ po.supplierName or '—' }}"
+                        data-supplier-address="{{ po.supplierAddress or '' }}"
+                        data-delivery-term="{{ po.deliveryTerm or '' }}"
+                        data-payment-term="{{ po.paymentTerm or '' }}"
+                        data-delivery-date="{{ po.deliveryDate or '' }}"
+                        data-payment-due-date="{{ po.paymentDueDate or '' }}"
+                        data-noa-number="{{ po.noaNumber or '' }}"
+                        data-notes="{{ po.notes or '' }}"
+                        data-branch="{{ po.branch or '' }}"
+                        data-vatable-amount="{{ po.vatableAmount or '' }}"
+                        data-vat-amount="{{ po.vatAmount or '' }}"
+                        data-total-amount="{{ po.totalAmount or '' }}"
+                        data-status="{{ po.status }}"
+                        data-created-by-name="{{ po.createdByName or '' }}"
+                        data-approver-name="{{ po.approverName or '' }}"
+                        data-approver-remarks="{{ po.approverRemarks or '' }}"
+                        data-attachment-url="{{ url_for('main.purchase_order_attachment', po_id=po.id) if po.attachmentPath else '' }}"
+                        {# single-quoted: Flask's tojson escapes < > & ' but NOT ", and JSON
+                           is full of " - double quotes here would end the attribute early
+                           and corrupt the row's markup #}
+                        data-items='{{ items_by_po.get(po.id, [])|tojson }}'>
+                        <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">{{ po.poNumber }}</td>
+                        <td class="table-td text-sm">{{ po.orderDate or '—' }}</td>
+                        <td class="table-td truncate">{{ po.supplierName or '—' }}</td>
+                        <td class="table-td text-sm">{{ po.branch or '—' }}</td>
+                        <td class="table-td text-sm">
+                            {% if po.totalAmount %}₱{{ '{:,.2f}'.format(po.totalAmount) }}{% else %}—{% endif %}
+                        </td>
+                        <td class="table-td">
+                            <span class="badge {{ STATUS_TONE.get(po.status, 'badge-slate') }}">{{ po.status }}</span>
+                            {% if po.status == 'Pending Approval' and po.approverName %}
+                            <p class="mt-1 truncate text-[11px] text-slate-400">Approver: {{ po.approverName }}</p>
+                            {% endif %}
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-view" title="View" aria-label="View Purchase Order">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                                {% if session.get('user_id') == po.approverUserId and po.status == 'Pending Approval' %}
+                                <button type="button" class="btn btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 js-approve"
+                                        data-url="{{ url_for('main.purchase_order_approve', po_id=po.id) }}" title="Approve">
+                                    <i data-lucide="check" class="h-4 w-4"></i>
+                                </button>
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-reject"
+                                        data-url="{{ url_for('main.purchase_order_reject', po_id=po.id) }}" title="Reject">
+                                    <i data-lucide="x" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if session.get('user_id') == po.createdBy %}
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-delete"
+                                        title="Delete" aria-label="Delete Purchase Order">
+                                    <i data-lucide="trash-2" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="file-text" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No Purchase Orders match your filters</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if page_count > 1 %}
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3
+                    dark:border-slate-800">
+            <p class="text-sm text-slate-500 dark:text-slate-400">
+                Showing <span class="font-medium text-slate-700 dark:text-slate-200">{{ ((page - 1) * per_page) + 1 }}</span>–<span
+                    class="font-medium text-slate-700 dark:text-slate-200">{{ [page * per_page, total]|min }}</span>
+                of <span class="font-medium text-slate-700 dark:text-slate-200">{{ '{:,}'.format(total) }}</span>
+            </p>
+
+            {% macro page_url(p) -%}
+                {{ url_for('main.purchase_orders', page=p, q=search or None, status=status or None) }}
+            {%- endmacro %}
+
+            <nav class="flex items-center gap-1" aria-label="Pagination">
+                {% if page > 1 %}
+                    <a href="{{ page_url(page - 1) }}" class="btn btn-secondary btn-sm" aria-label="Previous page">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </span>
+                {% endif %}
+
+                {% set win_start = [1, page - 2]|max %}
+                {% set win_end = [page_count, win_start + 4]|min %}
+                {% set win_start = [1, win_end - 4]|max %}
+
+                {% if win_start > 1 %}
+                    <a href="{{ page_url(1) }}" class="btn btn-secondary btn-sm">1</a>
+                    {% if win_start > 2 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                {% endif %}
+
+                {% for p in range(win_start, win_end + 1) %}
+                    {% if p == page %}
+                        <span class="btn btn-sm bg-accent-600 text-white shadow-sm">{{ p }}</span>
+                    {% else %}
+                        <a href="{{ page_url(p) }}" class="btn btn-secondary btn-sm">{{ p }}</a>
+                    {% endif %}
+                {% endfor %}
+
+                {% if win_end < page_count %}
+                    {% if win_end < page_count - 1 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                    <a href="{{ page_url(page_count) }}" class="btn btn-secondary btn-sm">{{ page_count }}</a>
+                {% endif %}
+
+                {% if page < page_count %}
+                    <a href="{{ page_url(page + 1) }}" class="btn btn-secondary btn-sm" aria-label="Next page">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </span>
+                {% endif %}
+            </nav>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ===================== Add Purchase Order modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-3xl">
+        <form id="recordForm" method="POST" action="{{ url_for('main.purchase_order_add') }}" enctype="multipart/form-data">
+            <div class="modal-header">
+                <h3 class="modal-title">Add Purchase Order</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-5">
+
+                <div class="relative" data-dropdown>
+                    <label class="label" for="supplierSearchInput">Supplier <span class="text-accent-600">*</span></label>
+                    <input type="text" class="input" id="supplierSearchInput" placeholder="Type a supplier's name…" autocomplete="off" required>
+                    <input type="hidden" id="fieldSupplierId" name="supplierId">
+                    <div data-dropdown-panel id="supplierOptions"
+                         class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                        <label class="label" for="fieldBranch">Branch</label>
+                        <input type="text" class="input" id="fieldBranch" name="branch" placeholder="e.g. Calamba">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldNoaNumber">NOA Number</label>
+                        <input type="text" class="input" id="fieldNoaNumber" name="noaNumber">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                        <label class="label" for="fieldDeliveryTerm">Delivery Term</label>
+                        <input type="text" class="input" id="fieldDeliveryTerm" name="deliveryTerm">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldPaymentTerm">Payment Term</label>
+                        <input type="text" class="input" id="fieldPaymentTerm" name="paymentTerm">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldDeliveryDate">Delivery Date</label>
+                        <input type="date" class="input" id="fieldDeliveryDate" name="deliveryDate">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldPaymentDueDate">Payment Due Date</label>
+                        <input type="date" class="input" id="fieldPaymentDueDate" name="paymentDueDate">
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
+                    <label class="label">Line Items <span class="text-accent-600">*</span></label>
+                    <p class="help mb-3">
+                        Search the item catalog to fill in description and unit, or type your own — quantity and unit cost are always entered manually.
+                    </p>
+
+                    <div id="itemsList" class="space-y-3"></div>
+
+                    <button type="button" class="btn btn-secondary mt-3" id="addItemBtn">
+                        <i data-lucide="plus" class="h-4 w-4"></i>Add Line Item
+                    </button>
+
+                    <input type="hidden" id="fieldItemsJson" name="itemsJson">
+
+                    <div class="mt-4 space-y-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3
+                                dark:border-slate-700 dark:bg-slate-800/50">
+                        <div class="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+                            <span>Vatable Sales</span>
+                            <span id="vatableDisplay">₱0.00</span>
+                        </div>
+                        <div class="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+                            <span>VAT (12%)</span>
+                            <span id="vatDisplay">₱0.00</span>
+                        </div>
+                        <div class="flex items-center justify-between border-t border-slate-200 pt-1 text-sm font-semibold
+                                    text-slate-900 dark:border-slate-700 dark:text-white">
+                            <span>Total Amount</span>
+                            <span id="grandTotalDisplay">₱0.00</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="label" for="fieldNotes">Notes</label>
+                    <textarea class="input" id="fieldNotes" name="notes" rows="2"></textarea>
+                </div>
+
+                <div>
+                    <label class="label" for="fieldAttachment">Supporting Document (optional)</label>
+                    <input type="file" class="input" id="fieldAttachment" name="attachment" accept="image/*,.pdf">
+                    <div id="attachmentPreviewWrap" class="hidden mt-3">
+                        <img id="attachmentPreview" class="h-24 w-24 rounded-lg border border-slate-200 object-cover dark:border-slate-700" alt="Attachment preview">
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
+                    <label class="label" for="approverSearchInput">Approver <span class="text-accent-600">*</span></label>
+                    <div class="relative" data-dropdown>
+                        <input type="text" class="input" id="approverSearchInput" placeholder="Type an approver's name…" autocomplete="off" required>
+                        <input type="hidden" id="fieldApproverUserId" name="approverUserId">
+                        <div data-dropdown-panel id="approverOptions"
+                             class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i data-lucide="send" class="h-4 w-4"></i>Submit Purchase Order
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# One line-item row. Kept in a <template> for the same reasons fuel_po.html's
+   tripCardTemplate is: markup lives with the rest of the HTML, and
+   template.content is a detached fragment so lucide.createIcons() doesn't scan
+   it prematurely. No ids inside - rows are keyed by data-item uid. #}
+<template id="itemRowTemplate">
+    <div class="js-item-row rounded-xl border border-slate-200 p-4 dark:border-slate-700" data-item="">
+        <div class="mb-3 flex items-center justify-between gap-2">
+            <span class="js-item-number grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-50
+                         text-xs font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"></span>
+            <button type="button" class="js-remove-item btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                    data-action="remove-item" aria-label="Remove this line item">
+                <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+        </div>
+
+        <div class="relative" data-dropdown>
+            <label class="label">Catalog / Description <span class="text-accent-600">*</span></label>
+            <input type="text" class="js-item-catalog-search input" autocomplete="off" placeholder="Search catalog # or item name, or type your own…">
+            <div class="js-item-catalog-panel hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg
+                        border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+        </div>
+
+        <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div class="col-span-2 sm:col-span-1">
+                <label class="label">Unit</label>
+                <input type="text" class="js-item-unit input">
+            </div>
+            <div>
+                <label class="label">Quantity <span class="text-accent-600">*</span></label>
+                <input type="number" class="js-item-quantity input" min="0.01" step="0.01">
+            </div>
+            <div>
+                <label class="label">Unit Cost (₱) <span class="text-accent-600">*</span></label>
+                <input type="number" class="js-item-unit-cost input" min="0" step="0.01">
+            </div>
+            <div>
+                <label class="label">Amount</label>
+                <input type="text" class="js-item-amount input cursor-not-allowed bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400" readonly tabindex="-1">
+            </div>
+        </div>
+
+        <div class="mt-3">
+            <label class="label">Allocation (program / grant / consignment, optional)</label>
+            <input type="text" class="js-item-allocation input">
+        </div>
+    </div>
+</template>
+
+<!-- ===================== View detail modal ===================== -->
+<div id="viewModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <h3 class="modal-title">Purchase Order Details</h3>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body space-y-3 text-sm">
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">PO Number</p><p id="viewPoNumber" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Status</p><p id="viewStatus" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Supplier</p><p id="viewSupplier" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Branch</p><p id="viewBranch" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Order Date</p><p id="viewOrderDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">NOA Number</p><p id="viewNoaNumber" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Delivery Term</p><p id="viewDeliveryTerm" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Payment Term</p><p id="viewPaymentTerm" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Delivery Date</p><p id="viewDeliveryDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Payment Due</p><p id="viewPaymentDueDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Created By</p><p id="viewCreatedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div>
+                <p class="help mb-1">Line Items</p>
+                <div id="viewItems" class="space-y-2"></div>
+            </div>
+            <div class="grid grid-cols-3 gap-3 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
+                <div><p class="help mb-0.5">Vatable</p><p id="viewVatable" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">VAT</p><p id="viewVat" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Total</p><p id="viewTotal" class="font-medium text-slate-900 dark:text-white"></p></div>
+            </div>
+            <div id="viewNotesWrap" class="hidden"><p class="help mb-0.5">Notes</p><p id="viewNotes" class="text-slate-700 dark:text-slate-300"></p></div>
+            <div id="viewAttachmentWrap" class="hidden">
+                <p class="help mb-1">Supporting Document</p>
+                <a id="viewAttachmentLink" href="#" target="_blank" rel="noopener">
+                    <img id="viewAttachmentImg" class="h-40 w-40 rounded-lg border border-slate-200 object-cover dark:border-slate-700" alt="Attachment">
+                </a>
+            </div>
+            <div class="border-t border-slate-200 pt-3 dark:border-slate-800">
+                <div><p class="help mb-0.5">Approver</p><p id="viewApprover" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div id="viewApproverRemarksWrap" class="hidden mt-1"><p class="help mb-0.5">Approver Remarks</p><p id="viewApproverRemarks" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Approve/Reject modal ===================== -->
+<div id="actionModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="actionForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title" id="actionModalTitle">Approve Purchase Order</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <label class="label" for="actionRemarks">Remarks (optional)</label>
+                <textarea class="input" id="actionRemarks" name="remarks" rows="3"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary" id="actionSubmitBtn">
+                    <i data-lucide="check" class="h-4 w-4"></i>Approve
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== Delete confirm modal ===================== -->
+<div id="deleteConfirmModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="deleteForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title">Delete Purchase Order</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="px-5 py-5">
+                <div class="flex items-start gap-3">
+                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+                        <i data-lucide="triangle-alert" class="h-5 w-5"></i>
+                    </span>
+                    <div>
+                        <p class="text-sm font-medium text-slate-900 dark:text-white">Delete this Purchase Order?</p>
+                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">This cannot be undone from here.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-danger">
+                    <i data-lucide="trash-2" class="h-4 w-4"></i>Delete
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var SUPPLIERS = {{ suppliers|tojson }};
+        var APPROVERS = {{ approvers|tojson }};
+        var INVENTORY_ITEMS = {{ inventory_items|tojson }};
+
+        var recordForm = document.getElementById('recordForm');
+        var tbody = document.getElementById('recordsBody');
+
+        /* ------------------------------------------------- searchable name pickers
+           Same [data-dropdown] contract as fuel_po.html's initSearchablePicker: visible
+           text input + hidden input carrying the real value. No data-dropdown-toggle on
+           these inputs - main.js's own toggle handler would race with this one (both bound
+           to the same element) and immediately re-close the panel it just opened. */
+        var searchablePanels = [];
+
+        function closeAllOtherDropdowns(exceptPanel) {
+            searchablePanels.forEach(function (p) {
+                if (p !== exceptPanel) p.classList.add('hidden');
+            });
+        }
+
+        function initSearchablePicker(inputId, hiddenId, panelId, items, getId, getLabel) {
+            var input = document.getElementById(inputId);
+            var hidden = document.getElementById(hiddenId);
+            var panel = document.getElementById(panelId);
+            searchablePanels.push(panel);
+
+            function render(filterText) {
+                var term = (filterText || '').trim().toLowerCase();
+                var matches = items.filter(function (item) {
+                    return !term || getLabel(item).toLowerCase().indexOf(term) !== -1;
+                });
+                panel.innerHTML = matches.length
+                    ? matches.map(function (item) {
+                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-id="'
+                            + getId(item) + '" data-name="' + getLabel(item).replace(/"/g, '&quot;') + '">' + getLabel(item) + '</button>';
+                    }).join('')
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matches</p>';
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-id]');
+                if (!btn) return;
+                input.value = btn.getAttribute('data-name');
+                hidden.value = btn.getAttribute('data-id');
+                hidden.dispatchEvent(new Event('change'));
+                panel.classList.add('hidden');
+            });
+
+            input.addEventListener('input', function () {
+                hidden.value = '';
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            input.addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeAllOtherDropdowns(panel);
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            return {
+                reset: function () {
+                    input.value = '';
+                    hidden.value = '';
+                    render('');
+                },
+            };
+        }
+
+        var supplierPicker = initSearchablePicker(
+            'supplierSearchInput', 'fieldSupplierId', 'supplierOptions', SUPPLIERS,
+            function (s) { return s.id; }, function (s) { return s.name; }
+        );
+        var approverPicker = initSearchablePicker(
+            'approverSearchInput', 'fieldApproverUserId', 'approverOptions', APPROVERS,
+            function (a) { return a.userId; }, function (a) { return a.name; }
+        );
+
+        /* ------------------------------------------------- attachment preview */
+        var attachmentInput = document.getElementById('fieldAttachment');
+        var attachmentPreviewWrap = document.getElementById('attachmentPreviewWrap');
+        var attachmentPreview = document.getElementById('attachmentPreview');
+
+        attachmentInput.addEventListener('change', function () {
+            var file = attachmentInput.files[0];
+            if (file && file.type.indexOf('image/') === 0) {
+                attachmentPreview.src = URL.createObjectURL(file);
+                attachmentPreviewWrap.classList.remove('hidden');
+            } else {
+                attachmentPreviewWrap.classList.add('hidden');
+            }
+        });
+
+        function escapeHtml(text) {
+            return String(text == null ? '' : text)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        /* ------------------------------------------------- line items
+           Rows are keyed by a minted uid, never array index - same reasoning as fuel_po's
+           trips: removing a row must not shift another row's identity mid-edit. Each row
+           carries its own catalog-search picker instance since main.js's dropdown system
+           was not built for many instances cloned from one <template>. */
+        var items = [];
+        var itemUidCounter = 0;
+
+        var itemsList = document.getElementById('itemsList');
+        var itemRowTemplate = document.getElementById('itemRowTemplate');
+        var fieldItemsJson = document.getElementById('fieldItemsJson');
+        var vatableDisplay = document.getElementById('vatableDisplay');
+        var vatDisplay = document.getElementById('vatDisplay');
+        var grandTotalDisplay = document.getElementById('grandTotalDisplay');
+
+        function peso(n) {
+            return '₱' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function itemByUid(uid) {
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].uid === uid) return items[i];
+            }
+            return null;
+        }
+
+        function rowFor(uid) {
+            return itemsList.querySelector('.js-item-row[data-item="' + uid + '"]');
+        }
+
+        function makeItem() {
+            itemUidCounter += 1;
+            return {
+                uid: 'i' + itemUidCounter,
+                itemId: null,
+                catalogCode: '',
+                description: '',
+                unit: '',
+                quantity: '',
+                unitCost: '',
+                allocation: '',
+            };
+        }
+
+        /* ------------------------------------------------- per-row catalog picker */
+
+        function initItemCatalogPicker(row, item) {
+            var input = row.querySelector('.js-item-catalog-search');
+            var panel = row.querySelector('.js-item-catalog-panel');
+            searchablePanels.push(panel);
+
+            function label(inv) { return inv.catalog + ' — ' + (inv.description || ''); }
+
+            function render(filterText) {
+                var term = (filterText || '').trim().toLowerCase();
+                var matches = !term ? [] : INVENTORY_ITEMS.filter(function (inv) {
+                    return inv.catalog.toLowerCase().indexOf(term) !== -1
+                        || (inv.description || '').toLowerCase().indexOf(term) !== -1;
+                }).slice(0, 30);
+                panel.innerHTML = matches.length
+                    ? matches.map(function (inv, idx) {
+                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-idx="' + idx + '">'
+                            + escapeHtml(label(inv)) + '</button>';
+                    }).join('')
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">Type to search, or just type a description below and use it as-is</p>';
+                panel._matches = matches;
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-idx]');
+                if (!btn || !panel._matches) return;
+                var inv = panel._matches[parseInt(btn.getAttribute('data-idx'), 10)];
+                if (!inv) return;
+                item.itemId = inv.id;
+                item.catalogCode = inv.catalog;
+                item.description = inv.description || '';
+                item.unit = inv.baseUnit || inv.purchaseUnit || inv.salesUnit || '';
+                input.value = label(inv);
+                row.querySelector('.js-item-unit').value = item.unit;
+                panel.classList.add('hidden');
+                syncItems();
+            });
+
+            input.addEventListener('input', function () {
+                // Free typing breaks the catalog link - this becomes a manual, unlinked
+                // line item, exactly like a legacy catalog code with no matching inventory
+                // row. The description itself (not the search box) is the source of truth.
+                item.itemId = null;
+                item.catalogCode = '';
+                item.description = input.value;
+                render(input.value);
+                panel.classList.remove('hidden');
+                syncItems();
+            });
+
+            input.addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeAllOtherDropdowns(panel);
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+        }
+
+        /* ------------------------------------------------- rendering
+           Surgical: only the piece that changed is touched, so typing in one field never
+           rebuilds (and steals focus from) another. Full rebuild only happens on reset. */
+
+        function appendItemRow(item) {
+            var frag = itemRowTemplate.content.cloneNode(true);
+            var row = frag.querySelector('.js-item-row');
+            row.setAttribute('data-item', item.uid);
+            itemsList.appendChild(frag);
+            var liveRow = rowFor(item.uid);
+            initItemCatalogPicker(liveRow, item);
+            OS.refreshIcons();
+        }
+
+        function renumberItems() {
+            var rows = itemsList.querySelectorAll('.js-item-row');
+            rows.forEach(function (row, i) {
+                row.querySelector('.js-item-number').textContent = i + 1;
+                row.querySelector('.js-remove-item').classList.toggle('hidden', rows.length <= 1);
+            });
+        }
+
+        /* ------------------------------------------------- serialization + totals */
+
+        function syncItems() {
+            fieldItemsJson.value = JSON.stringify(items.map(function (it) {
+                return {
+                    itemId: it.itemId,
+                    catalogCode: it.catalogCode,
+                    description: it.description,
+                    unit: it.unit,
+                    quantity: it.quantity,
+                    unitCost: it.unitCost,
+                    allocation: it.allocation,
+                };
+            }));
+
+            var vatable = 0;
+            items.forEach(function (it) {
+                var q = parseFloat(it.quantity), c = parseFloat(it.unitCost);
+                var amount = (isFinite(q) && q > 0 && isFinite(c) && c >= 0) ? q * c : 0;
+                var row = rowFor(it.uid);
+                if (row) row.querySelector('.js-item-amount').value = amount > 0 ? peso(amount) : '';
+                vatable += amount;
+            });
+            var vat = vatable * 0.12;
+            vatableDisplay.textContent = peso(vatable);
+            vatDisplay.textContent = peso(vat);
+            grandTotalDisplay.textContent = peso(vatable + vat);
+        }
+
+        /* ------------------------------------------------- add / remove items */
+
+        function addItem() {
+            var item = makeItem();
+            items.push(item);
+            appendItemRow(item);
+            renumberItems();
+            syncItems();
+            return item;
+        }
+
+        function removeItem(uid) {
+            var row = rowFor(uid);
+            if (row) row.remove();
+            items = items.filter(function (it) { return it.uid !== uid; });
+            renumberItems();
+            syncItems();
+        }
+
+        function resetItems() {
+            items = [];
+            itemsList.innerHTML = '';
+            addItem();
+        }
+
+        itemsList.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-action]');
+            if (!btn) return;
+            var row = btn.closest('.js-item-row');
+            if (!row) return;
+            var uid = row.getAttribute('data-item');
+            if (btn.getAttribute('data-action') === 'remove-item') removeItem(uid);
+        });
+
+        itemsList.addEventListener('input', function (e) {
+            var row = e.target.closest('.js-item-row');
+            if (!row) return;
+            var item = itemByUid(row.getAttribute('data-item'));
+            if (!item) return;
+
+            if (e.target.classList.contains('js-item-unit')) {
+                item.unit = e.target.value;
+                syncItems();
+            } else if (e.target.classList.contains('js-item-quantity')) {
+                item.quantity = e.target.value;
+                syncItems();
+            } else if (e.target.classList.contains('js-item-unit-cost')) {
+                item.unitCost = e.target.value;
+                syncItems();
+            } else if (e.target.classList.contains('js-item-allocation')) {
+                item.allocation = e.target.value;
+                syncItems();
+            }
+        });
+
+        document.getElementById('addItemBtn').addEventListener('click', function () { addItem(); });
+
+        /* ------------------------------------------------- submit-time validation */
+
+        recordForm.addEventListener('submit', function (e) {
+            if (!items.length) {
+                e.preventDefault();
+                alert('Add at least one line item before submitting.');
+                return;
+            }
+            for (var i = 0; i < items.length; i++) {
+                var it = items[i], n = i + 1;
+                if (!(it.description || '').trim()) {
+                    e.preventDefault(); alert('Line item ' + n + ' needs a description.'); return;
+                }
+                if (!(parseFloat(it.quantity) > 0)) {
+                    e.preventDefault(); alert('Line item ' + n + ' needs a quantity.'); return;
+                }
+                if (!(parseFloat(it.unitCost) >= 0)) {
+                    e.preventDefault(); alert('Line item ' + n + ' needs a unit cost.'); return;
+                }
+            }
+        });
+
+        /* ------------------------------------------------------------- add */
+        document.getElementById('addNewBtn').addEventListener('click', function () {
+            recordForm.reset();
+            attachmentPreviewWrap.classList.add('hidden');
+            supplierPicker.reset();
+            approverPicker.reset();
+            resetItems();
+            OS.openModal('recordModal');
+        });
+
+        /* --------------------------------------------------------- view/approve/reject/delete */
+        var viewFields = {
+            viewPoNumber: 'po-number', viewSupplier: 'supplier-name', viewBranch: 'branch',
+            viewOrderDate: 'order-date', viewNoaNumber: 'noa-number',
+            viewDeliveryTerm: 'delivery-term', viewPaymentTerm: 'payment-term',
+            viewDeliveryDate: 'delivery-date', viewPaymentDueDate: 'payment-due-date',
+            viewCreatedBy: 'created-by-name', viewStatus: 'status', viewApprover: 'approver-name',
+        };
+
+        function renderViewItems(row) {
+            var wrap = document.getElementById('viewItems');
+            var poItems = [];
+            try {
+                poItems = JSON.parse(row.getAttribute('data-items') || '[]');
+            } catch (err) {
+                poItems = [];
+            }
+            if (!poItems.length) {
+                wrap.innerHTML = '<p class="text-slate-500 dark:text-slate-400">No line items.</p>';
+                return;
+            }
+            wrap.innerHTML = poItems.map(function (it, i) {
+                var meta = [];
+                if (it.quantity != null) meta.push(it.quantity + (it.unit ? ' ' + it.unit : ''));
+                if (it.unitCost != null) meta.push('@ ' + peso(it.unitCost));
+                if (it.amount != null) meta.push(peso(it.amount));
+                return '<div class="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
+                    + '<div class="mb-0.5 flex items-center justify-between gap-2">'
+                    + '<span class="text-xs font-semibold text-slate-900 dark:text-white">' + (i + 1) + '. '
+                    + escapeHtml(it.description || it.catalogCode || '—') + '</span>'
+                    + '<span class="shrink-0 text-xs text-slate-500 dark:text-slate-400">' + meta.join(' · ') + '</span>'
+                    + '</div>'
+                    + (it.allocation ? '<p class="text-[11px] text-slate-400">' + escapeHtml(it.allocation) + '</p>' : '')
+                    + '</div>';
+            }).join('');
+        }
+
+        function openView(row) {
+            Object.keys(viewFields).forEach(function (elId) {
+                document.getElementById(elId).textContent = row.getAttribute('data-' + viewFields[elId]) || '—';
+            });
+            renderViewItems(row);
+
+            var vatable = row.getAttribute('data-vatable-amount');
+            var vat = row.getAttribute('data-vat-amount');
+            var total = row.getAttribute('data-total-amount');
+            document.getElementById('viewVatable').textContent = vatable ? peso(Number(vatable)) : '—';
+            document.getElementById('viewVat').textContent = vat ? peso(Number(vat)) : '—';
+            document.getElementById('viewTotal').textContent = total ? peso(Number(total)) : '—';
+
+            var notes = row.getAttribute('data-notes');
+            document.getElementById('viewNotesWrap').classList.toggle('hidden', !notes);
+            document.getElementById('viewNotes').textContent = notes || '';
+
+            var attachmentUrl = row.getAttribute('data-attachment-url');
+            document.getElementById('viewAttachmentWrap').classList.toggle('hidden', !attachmentUrl);
+            if (attachmentUrl) {
+                document.getElementById('viewAttachmentLink').href = attachmentUrl;
+                document.getElementById('viewAttachmentImg').src = attachmentUrl;
+            }
+
+            var approverRemarks = row.getAttribute('data-approver-remarks');
+            document.getElementById('viewApproverRemarksWrap').classList.toggle('hidden', !approverRemarks);
+            document.getElementById('viewApproverRemarks').textContent = approverRemarks || '';
+
+            OS.openModal('viewModal');
+        }
+
+        var actionForm = document.getElementById('actionForm');
+        var actionModalTitle = document.getElementById('actionModalTitle');
+        var actionSubmitBtn = document.getElementById('actionSubmitBtn');
+
+        function openAction(url, isReject) {
+            actionForm.action = url;
+            document.getElementById('actionRemarks').value = '';
+            actionModalTitle.textContent = isReject ? 'Reject Purchase Order' : 'Approve Purchase Order';
+            actionSubmitBtn.className = 'btn ' + (isReject ? 'btn-danger' : 'btn-primary');
+            actionSubmitBtn.innerHTML = isReject
+                ? '<i data-lucide="x" class="h-4 w-4"></i>Reject'
+                : '<i data-lucide="check" class="h-4 w-4"></i>Approve';
+            OS.refreshIcons();
+            OS.openModal('actionModal');
+        }
+
+        var deleteForm = document.getElementById('deleteForm');
+
+        tbody.addEventListener('click', function (e) {
+            var viewBtn = e.target.closest('.js-view');
+            var approveBtn = e.target.closest('.js-approve');
+            var rejectBtn = e.target.closest('.js-reject');
+            var delBtn = e.target.closest('.js-delete');
+
+            if (viewBtn) openView(viewBtn.closest('tr'));
+            if (approveBtn) openAction(approveBtn.getAttribute('data-url'), false);
+            if (rejectBtn) openAction(rejectBtn.getAttribute('data-url'), true);
+            if (delBtn) {
+                deleteForm.action = '/page/purchase_order_orders/' + delBtn.closest('tr').getAttribute('data-id') + '/delete';
+                OS.openModal('deleteConfirmModal');
+            }
+        });
+
+        /* --------------------------------------------------------------- search */
+        var searchInput = document.getElementById('poSearch');
+        searchInput.addEventListener('search', function () {
+            if (searchInput.value === '') document.getElementById('searchForm').submit();
+        });
+    })();
+</script>
+{% endblock %}

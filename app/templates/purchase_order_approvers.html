@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}PO Approvers - Office System{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex items-start gap-3">
+        <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                     dark:bg-brand-500/10 dark:text-brand-400">
+            <i data-lucide="shield-check" class="h-5 w-5"></i>
+        </span>
+        <div>
+            <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">PO Approvers</h1>
+            <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                Who can be picked as the Approver when a Purchase Order is submitted.
+            </p>
+        </div>
+    </div>
+
+    <div class="card max-w-lg overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="user-check" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Approvers
+            </h2>
+            <span class="badge badge-slate whitespace-nowrap">{{ approvers|length }}</span>
+        </div>
+
+        <div class="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+            <form method="POST" action="{{ url_for('main.purchase_order_approvers_add') }}" class="flex items-center gap-2">
+                <select class="input flex-1" name="userId" required>
+                    <option value="" disabled selected>Select a user…</option>
+                    {% for u in users %}
+                        {% if u.id not in approvers|map(attribute='userId')|list %}
+                        <option value="{{ u.id }}">{{ u.name }}</option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-primary shrink-0">
+                    <i data-lucide="plus" class="h-4 w-4"></i>Add
+                </button>
+            </form>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <tbody>
+                    {% for a in approvers %}
+                    <tr class="table-row">
+                        <td class="table-td">
+                            <p class="font-medium text-slate-900 dark:text-white">{{ a.name }}</p>
+                            <p class="text-xs text-slate-500 dark:text-slate-400">{{ a.email }}</p>
+                        </td>
+                        <td class="table-td w-16 text-right">
+                            <form method="POST" action="{{ url_for('main.purchase_order_approvers_remove', approver_id=a.id) }}">
+                                <button type="submit" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                                        title="Remove" aria-label="Remove {{ a.name }}">
+                                    <i data-lucide="x" class="h-4 w-4"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td class="px-5 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+                            No approvers yet.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

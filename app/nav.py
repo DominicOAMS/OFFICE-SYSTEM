@@ -66,6 +66,7 @@ NAV_ITEMS = [
             {"label": "Vehicles", "icon": "car", "slug": "parameters_vehicles"},
             {"label": "Fuel Approvers", "icon": "shield-check", "slug": "parameters_fuel_approvers"},
             {"label": "Fuel Prices", "icon": "gauge", "slug": "parameters_fuel_prices"},
+            {"label": "PO Approvers", "icon": "shield-check", "slug": "parameters_purchase_order_approvers"},
         ],
     },
 ]
