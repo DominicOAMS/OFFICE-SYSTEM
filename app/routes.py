@@ -31,6 +31,7 @@ from . import (
     suppliers_repo,
     users_repo,
     vehicles_repo,
+    warehouse_transactions_repo,
 )
 from . import routing
 from .nav import flatten_slugs
@@ -1431,6 +1432,204 @@ def purchase_order_approvers_remove(approver_id):
     purchase_order_approvers_repo.remove_approver(approver_id, updated_by=session.get("user_id"))
     flash("Removed.", "success")
     return redirect(url_for("main.purchase_order_approvers"))
+
+
+WAREHOUSE_TXN_PER_PAGE = 30
+MAX_TXN_ITEMS = 50
+
+
+def _txn_item_for_view(item):
+    """Display-ready primitives for the View modal's line-item breakdown - same reasoning
+    as _item_for_view: Decimal/date don't serialize the way a human wants via |tojson."""
+    return {
+        "catalogCode": item["catalogCode"],
+        "description": item["description"],
+        "unit": item["unit"],
+        "category": item["category"],
+        "quantity": item["quantity"],
+        "lot": item["lot"],
+        "expiryDate": item["expiryDate"].strftime("%b %d, %Y") if item["expiryDate"] else None,
+    }
+
+
+@main_bp.route("/page/warehouse_transactions")
+@login_required
+def warehouse_transactions():
+    search = request.args.get("q", "").strip()
+    direction = request.args.get("direction", "").strip().upper()
+    status = request.args.get("status", "").strip()
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    total = warehouse_transactions_repo.count_transactions(search or None, direction or None, status or None)
+    page_count = max(1, -(-total // WAREHOUSE_TXN_PER_PAGE))  # ceil
+    page = min(page, page_count)
+
+    records = warehouse_transactions_repo.list_transactions(
+        search=search or None,
+        direction=direction or None,
+        status=status or None,
+        limit=WAREHOUSE_TXN_PER_PAGE,
+        offset=(page - 1) * WAREHOUSE_TXN_PER_PAGE,
+    )
+    items_by_txn = {
+        txn_id: [_txn_item_for_view(i) for i in items]
+        for txn_id, items in warehouse_transactions_repo.list_items_for_transactions(
+            [r["id"] for r in records]
+        ).items()
+    }
+    return render_template(
+        "warehouse_transactions.html",
+        transactions=records,
+        items_by_txn=items_by_txn,
+        approved_purchase_orders=purchase_orders_repo.list_purchase_orders(status="Approved"),
+        inventory_items=purchase_orders_repo.list_active_inventory_items(),
+        search=search,
+        direction=direction,
+        status=status,
+        page=page,
+        page_count=page_count,
+        total=total,
+        per_page=WAREHOUSE_TXN_PER_PAGE,
+    )
+
+
+def _parse_transaction_items(raw_json):
+    """The repeatable line-items payload from the Add form. A line is DROPPED (not
+    patched) when missing a description or a positive quantity - same "drop, don't patch"
+    rule _parse_items uses. No cost fields here at all - this module records physical
+    movement, not money."""
+    try:
+        parsed = json.loads(raw_json or "[]")
+    except ValueError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+
+    items = []
+    for entry in parsed[:MAX_TXN_ITEMS]:
+        if not isinstance(entry, dict):
+            continue
+        description = _clip((entry.get("description") or "").strip())
+        quantity = _parse_coordinate(str(entry.get("quantity", "")))
+        item_id_raw = str(entry.get("itemId", "")).strip()
+        if not description or quantity is None or quantity <= 0:
+            continue
+        items.append(
+            {
+                "itemId": int(item_id_raw) if item_id_raw.isdigit() else None,
+                "catalogCode": _clip((entry.get("catalogCode") or "").strip()) or None,
+                "description": description,
+                "unit": _clip((entry.get("unit") or "").strip(), limit=30) or None,
+                "category": _clip((entry.get("category") or "").strip(), limit=50) or None,
+                "quantity": int(quantity),
+                "lot": _clip((entry.get("lot") or "").strip(), limit=50) or None,
+                "expiryDate": (entry.get("expiryDate") or "").strip() or None,
+            }
+        )
+    return items
+
+
+def _parse_warehouse_transaction_form():
+    direction = "IN" if request.form.get("direction", "").strip().lower() == "in" else "OUT"
+    items = _parse_transaction_items(request.form.get("itemsJson"))
+
+    purchase_order_id = None
+    po_number = None
+    supplier_invoice = None
+    si_number = customer_po = dr_number = supplier_dr_number = None
+
+    if direction == "IN":
+        po_id_raw = request.form.get("purchaseOrderId", "").strip()
+        po = purchase_orders_repo.get_purchase_order(int(po_id_raw)) if po_id_raw.isdigit() else None
+        if po:
+            purchase_order_id = po["id"]
+            po_number = po["poNumber"]
+        reason = "Purchase Order" if po else "Manual"
+        supplier_invoice = _clip(request.form.get("supplierInvoice", "").strip(), limit=100) or None
+    else:
+        reason = "Manual"
+        si_number = _clip(request.form.get("siNumber", "").strip(), limit=50) or None
+        customer_po = _clip(request.form.get("customerPo", "").strip(), limit=100) or None
+        dr_number = _clip(request.form.get("drNumber", "").strip(), limit=50) or None
+        supplier_dr_number = _clip(request.form.get("supplierDrNumber", "").strip(), limit=50) or None
+
+    return {
+        "direction": direction,
+        "reason": reason,
+        "purchaseOrderId": purchase_order_id,
+        "poNumber": po_number,
+        "supplierInvoice": supplier_invoice,
+        "siNumber": si_number,
+        "customerPo": customer_po,
+        "drNumber": dr_number,
+        "supplierDrNumber": supplier_dr_number,
+        "careTo": _clip(request.form.get("careTo", "").strip()) or None,
+        "note": _clip(request.form.get("note", "").strip()) or None,
+        "branch": _clip(request.form.get("branch", "").strip(), limit=100) or None,
+        "items": items,
+    }
+
+
+@main_bp.route("/page/warehouse_transactions/add", methods=["POST"])
+@login_required
+def warehouse_transaction_add():
+    data = _parse_warehouse_transaction_form()
+    if not data["items"]:
+        flash("Add at least one line item — every item needs a description and quantity.", "error")
+        return redirect(url_for("main.warehouse_transactions"))
+
+    try:
+        transaction_id = warehouse_transactions_repo.create_transaction(data, created_by=session.get("user_id"))
+    except (IntegrityError, DataError):
+        flash("Could not submit — one of the selected records no longer exists, or a value was too long to save.", "error")
+        return redirect(url_for("main.warehouse_transactions"))
+
+    flash(f"Stock {'In' if data['direction'] == 'IN' else 'Out'} #{transaction_id:06d} recorded.", "success")
+    return redirect(url_for("main.warehouse_transactions"))
+
+
+@main_bp.route("/page/warehouse_transactions/<int:txn_id>/delete", methods=["POST"])
+@login_required
+def warehouse_transaction_delete(txn_id):
+    txn = warehouse_transactions_repo.get_transaction(txn_id)
+    if not txn:
+        abort(404)
+    if txn["createdBy"] != session.get("user_id") or txn["status"] != "Created":
+        abort(403)
+    warehouse_transactions_repo.soft_delete_transaction(txn_id, updated_by=session.get("user_id"))
+    flash("Transaction deleted.", "success")
+    return redirect(url_for("main.warehouse_transactions"))
+
+
+@main_bp.route("/page/warehouse_transactions/<int:txn_id>/verify", methods=["POST"])
+@login_required
+def warehouse_transaction_verify(txn_id):
+    txn = warehouse_transactions_repo.get_transaction(txn_id)
+    if not txn:
+        abort(404)
+    # A creator can't verify their own entry - the whole point of a second-person check.
+    if txn["status"] != "Created" or txn["createdBy"] == session.get("user_id"):
+        abort(403)
+    warehouse_transactions_repo.verify(txn_id, verified_by=session.get("user_id"))
+    flash("Transaction verified.", "success")
+    return redirect(url_for("main.warehouse_transactions"))
+
+
+@main_bp.route("/page/warehouse_transactions/<int:txn_id>/finish", methods=["POST"])
+@login_required
+def warehouse_transaction_finish(txn_id):
+    txn = warehouse_transactions_repo.get_transaction(txn_id)
+    if not txn:
+        abort(404)
+    if txn["status"] != "Verified":
+        abort(403)
+    warehouse_transactions_repo.finish(txn_id, finished_by=session.get("user_id"))
+    flash("Transaction finished.", "success")
+    return redirect(url_for("main.warehouse_transactions"))
 
 
 @main_bp.route("/page/<slug>")

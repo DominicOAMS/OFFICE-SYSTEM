@@ -1,0 +1,809 @@
+{% extends "base.html" %}
+
+{% block title %}Warehouse Transactions - Office System{% endblock %}
+
+{% block content %}
+{% set STATUS_TONE = {
+    'Created': 'badge-slate',
+    'Verified': 'badge-warning',
+    'Finished': 'badge-success'
+} %}
+{% set DIRECTION_TONE = {
+    'IN': 'badge-success',
+    'OUT': 'badge-accent'
+} %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="arrow-left-right" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Warehouse Transactions</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    Record stock movements in and out, and verify them once confirmed.
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Add Transaction
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="arrow-left-right" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Stock Movements
+            </h2>
+            <div class="flex items-center gap-2">
+                <form method="GET" action="{{ url_for('main.warehouse_transactions') }}" class="relative" id="searchForm">
+                    {% if direction %}<input type="hidden" name="direction" value="{{ direction }}">{% endif %}
+                    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" id="txnSearch" value="{{ search }}"
+                           placeholder="Search PO #, SI #, DR #, item…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </form>
+                <span class="badge badge-slate whitespace-nowrap">{{ '{:,}'.format(total) }} shown</span>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+            {% for value, label in [('', 'All'), ('IN', 'Stock In'), ('OUT', 'Stock Out')] %}
+            <a href="{{ url_for('main.warehouse_transactions', q=search or None, direction=value or None, status=status or None) }}"
+               class="badge {{ 'bg-accent-600 text-white ring-0' if direction == value else 'badge-slate' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+            <span class="mx-1 h-4 w-px bg-slate-200 dark:bg-slate-700"></span>
+            {% for value, label in [('', 'All Statuses'), ('Created', 'Created'), ('Verified', 'Verified'), ('Finished', 'Finished')] %}
+            <a href="{{ url_for('main.warehouse_transactions', q=search or None, direction=direction or None, status=value or None) }}"
+               class="badge {{ 'bg-accent-600 text-white ring-0' if status == value else 'badge-slate' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[64rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th w-20">#</th>
+                        <th class="table-th w-20">Direction</th>
+                        <th class="table-th w-24">Date</th>
+                        <th class="table-th">Reference</th>
+                        <th class="table-th">Care Of</th>
+                        <th class="table-th w-28">Status</th>
+                        <th class="table-th w-32 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for t in transactions %}
+                    <tr class="table-row"
+                        data-id="{{ t.id }}"
+                        data-direction="{{ t.direction }}"
+                        data-reason="{{ t.reason }}"
+                        data-created-at="{{ t.createdAt }}"
+                        data-po-number="{{ t.poNumber or '' }}"
+                        data-si-number="{{ t.siNumber or '' }}"
+                        data-dr-number="{{ t.drNumber or '' }}"
+                        data-customer-po="{{ t.customerPo or '' }}"
+                        data-supplier-invoice="{{ t.supplierInvoice or '' }}"
+                        data-supplier-dr-number="{{ t.supplierDrNumber or '' }}"
+                        data-care-to="{{ t.careTo or '' }}"
+                        data-note="{{ t.note or '' }}"
+                        data-branch="{{ t.branch or '' }}"
+                        data-status="{{ t.status }}"
+                        data-created-by-name="{{ t.createdByName or '' }}"
+                        data-verified-by-name="{{ t.verifiedByName or '' }}"
+                        data-finished-by-name="{{ t.finishedByName or '' }}"
+                        {# single-quoted: Flask's tojson escapes < > & ' but NOT ", and JSON
+                           is full of " - double quotes here would end the attribute early
+                           and corrupt the row's markup #}
+                        data-items='{{ items_by_txn.get(t.id, [])|tojson }}'>
+                        <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">{{ '%06d' % t.id }}</td>
+                        <td class="table-td">
+                            <span class="badge {{ DIRECTION_TONE.get(t.direction, 'badge-slate') }}">
+                                {{ 'Stock In' if t.direction == 'IN' else 'Stock Out' }}
+                            </span>
+                        </td>
+                        <td class="table-td text-sm">{{ t.createdAt.strftime('%b %d, %Y') if t.createdAt else '—' }}</td>
+                        <td class="table-td truncate text-sm">
+                            {% if t.poNumber %}PO {{ t.poNumber }}
+                            {% elif t.siNumber %}SI {{ t.siNumber }}
+                            {% elif t.drNumber %}DR {{ t.drNumber }}
+                            {% else %}{{ t.reason }}{% endif %}
+                        </td>
+                        <td class="table-td truncate text-sm">{{ t.careTo or '—' }}</td>
+                        <td class="table-td">
+                            <span class="badge {{ STATUS_TONE.get(t.status, 'badge-slate') }}">{{ t.status }}</span>
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-view" title="View" aria-label="View Transaction">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                                {% if t.status == 'Created' and session.get('user_id') != t.createdBy %}
+                                <button type="button" class="btn btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 js-verify"
+                                        data-url="{{ url_for('main.warehouse_transaction_verify', txn_id=t.id) }}" title="Verify">
+                                    <i data-lucide="check" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if t.status == 'Verified' %}
+                                <button type="button" class="btn btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 js-finish"
+                                        data-url="{{ url_for('main.warehouse_transaction_finish', txn_id=t.id) }}" title="Finish">
+                                    <i data-lucide="check-check" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if t.status == 'Created' and session.get('user_id') == t.createdBy %}
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-delete"
+                                        title="Delete" aria-label="Delete Transaction">
+                                    <i data-lucide="trash-2" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="arrow-left-right" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No transactions match your filters</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if page_count > 1 %}
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3
+                    dark:border-slate-800">
+            <p class="text-sm text-slate-500 dark:text-slate-400">
+                Showing <span class="font-medium text-slate-700 dark:text-slate-200">{{ ((page - 1) * per_page) + 1 }}</span>–<span
+                    class="font-medium text-slate-700 dark:text-slate-200">{{ [page * per_page, total]|min }}</span>
+                of <span class="font-medium text-slate-700 dark:text-slate-200">{{ '{:,}'.format(total) }}</span>
+            </p>
+
+            {% macro page_url(p) -%}
+                {{ url_for('main.warehouse_transactions', page=p, q=search or None, direction=direction or None, status=status or None) }}
+            {%- endmacro %}
+
+            <nav class="flex items-center gap-1" aria-label="Pagination">
+                {% if page > 1 %}
+                    <a href="{{ page_url(page - 1) }}" class="btn btn-secondary btn-sm" aria-label="Previous page">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </span>
+                {% endif %}
+
+                {% set win_start = [1, page - 2]|max %}
+                {% set win_end = [page_count, win_start + 4]|min %}
+                {% set win_start = [1, win_end - 4]|max %}
+
+                {% if win_start > 1 %}
+                    <a href="{{ page_url(1) }}" class="btn btn-secondary btn-sm">1</a>
+                    {% if win_start > 2 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                {% endif %}
+
+                {% for p in range(win_start, win_end + 1) %}
+                    {% if p == page %}
+                        <span class="btn btn-sm bg-accent-600 text-white shadow-sm">{{ p }}</span>
+                    {% else %}
+                        <a href="{{ page_url(p) }}" class="btn btn-secondary btn-sm">{{ p }}</a>
+                    {% endif %}
+                {% endfor %}
+
+                {% if win_end < page_count %}
+                    {% if win_end < page_count - 1 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                    <a href="{{ page_url(page_count) }}" class="btn btn-secondary btn-sm">{{ page_count }}</a>
+                {% endif %}
+
+                {% if page < page_count %}
+                    <a href="{{ page_url(page + 1) }}" class="btn btn-secondary btn-sm" aria-label="Next page">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </span>
+                {% endif %}
+            </nav>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ===================== Add Transaction modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-3xl">
+        <form id="recordForm" method="POST" action="{{ url_for('main.warehouse_transaction_add') }}">
+            <div class="modal-header">
+                <h3 class="modal-title">Add Transaction</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-5">
+
+                <div>
+                    <label class="label">Direction <span class="text-accent-600">*</span></label>
+                    <div class="flex items-center gap-4">
+                        <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                            <input type="radio" class="checkbox" name="direction" value="in" id="directionIn" checked> Stock In
+                        </label>
+                        <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                            <input type="radio" class="checkbox" name="direction" value="out" id="directionOut"> Stock Out
+                        </label>
+                    </div>
+                </div>
+
+                <div id="stockInFields">
+                    <div class="relative" data-dropdown>
+                        <label class="label" for="poSearchInput">Purchase Order (optional)</label>
+                        <input type="text" class="input" id="poSearchInput" placeholder="Search an Approved PO, or leave blank for Manual…" autocomplete="off">
+                        <input type="hidden" id="fieldPurchaseOrderId" name="purchaseOrderId">
+                        <div data-dropdown-panel id="poOptions"
+                             class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                        <p class="help">Leave blank for an ad-hoc / manual stock-in with no Purchase Order.</p>
+                    </div>
+                    <div class="mt-4">
+                        <label class="label" for="fieldSupplierInvoice">Supplier Invoice #</label>
+                        <input type="text" class="input" id="fieldSupplierInvoice" name="supplierInvoice">
+                    </div>
+                </div>
+
+                <div id="stockOutFields" class="hidden space-y-4">
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                            <label class="label" for="fieldSiNumber">SI Number</label>
+                            <input type="text" class="input" id="fieldSiNumber" name="siNumber">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldDrNumber">DR Number</label>
+                            <input type="text" class="input" id="fieldDrNumber" name="drNumber">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldCustomerPo">Customer PO #</label>
+                            <input type="text" class="input" id="fieldCustomerPo" name="customerPo">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldSupplierDrNumber">Supplier DR Number</label>
+                            <input type="text" class="input" id="fieldSupplierDrNumber" name="supplierDrNumber">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                        <label class="label" for="fieldCareTo" id="careToLabel">Received By</label>
+                        <input type="text" class="input" id="fieldCareTo" name="careTo">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldBranch">Branch</label>
+                        <input type="text" class="input" id="fieldBranch" name="branch" placeholder="e.g. Calamba">
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
+                    <label class="label">Line Items <span class="text-accent-600">*</span></label>
+                    <p class="help mb-3">
+                        Search the item catalog to fill in description and unit, or type your own.
+                    </p>
+
+                    <div id="itemsList" class="space-y-3"></div>
+
+                    <button type="button" class="btn btn-secondary mt-3" id="addItemBtn">
+                        <i data-lucide="plus" class="h-4 w-4"></i>Add Line Item
+                    </button>
+
+                    <input type="hidden" id="fieldItemsJson" name="itemsJson">
+                </div>
+
+                <div>
+                    <label class="label" for="fieldNote">Note</label>
+                    <textarea class="input" id="fieldNote" name="note" rows="2"></textarea>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i data-lucide="send" class="h-4 w-4"></i>Record Transaction
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# One line-item row. Kept in a <template>, same reasoning as purchase_orders.html's
+   itemRowTemplate: markup lives with the rest of the HTML, and template.content is a
+   detached fragment so lucide.createIcons() doesn't scan it prematurely. #}
+<template id="itemRowTemplate">
+    <div class="js-item-row rounded-xl border border-slate-200 p-4 dark:border-slate-700" data-item="">
+        <div class="mb-3 flex items-center justify-between gap-2">
+            <span class="js-item-number grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-50
+                         text-xs font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"></span>
+            <button type="button" class="js-remove-item btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                    data-action="remove-item" aria-label="Remove this line item">
+                <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+        </div>
+
+        <div class="relative" data-dropdown>
+            <label class="label">Catalog / Description <span class="text-accent-600">*</span></label>
+            <input type="text" class="js-item-catalog-search input" autocomplete="off" placeholder="Search catalog # or item name, or type your own…">
+            <div class="js-item-catalog-panel hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg
+                        border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+        </div>
+
+        <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+                <label class="label">Unit</label>
+                <input type="text" class="js-item-unit input">
+            </div>
+            <div>
+                <label class="label">Quantity <span class="text-accent-600">*</span></label>
+                <input type="number" class="js-item-quantity input" min="1" step="1">
+            </div>
+            <div>
+                <label class="label">Lot</label>
+                <input type="text" class="js-item-lot input">
+            </div>
+            <div>
+                <label class="label">Expiry Date</label>
+                <input type="date" class="js-item-expiry input">
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- ===================== View detail modal ===================== -->
+<div id="viewModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <h3 class="modal-title">Transaction Details</h3>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body space-y-3 text-sm">
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">Direction</p><p id="viewDirection" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Status</p><p id="viewStatus" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Date</p><p id="viewCreatedAt" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Branch</p><p id="viewBranch" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Care Of</p><p id="viewCareTo" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Reference</p><p id="viewReference" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Created By</p><p id="viewCreatedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Verified By</p><p id="viewVerifiedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Finished By</p><p id="viewFinishedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div>
+                <p class="help mb-1">Line Items</p>
+                <div id="viewItems" class="space-y-2"></div>
+            </div>
+            <div id="viewNoteWrap" class="hidden"><p class="help mb-0.5">Note</p><p id="viewNote" class="text-slate-700 dark:text-slate-300"></p></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Delete confirm modal ===================== -->
+<div id="deleteConfirmModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="deleteForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title">Delete Transaction</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="px-5 py-5">
+                <div class="flex items-start gap-3">
+                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+                        <i data-lucide="triangle-alert" class="h-5 w-5"></i>
+                    </span>
+                    <div>
+                        <p class="text-sm font-medium text-slate-900 dark:text-white">Delete this transaction?</p>
+                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">This cannot be undone from here.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-danger">
+                    <i data-lucide="trash-2" class="h-4 w-4"></i>Delete
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var APPROVED_POS = {{ approved_purchase_orders|tojson }};
+        var INVENTORY_ITEMS = {{ inventory_items|tojson }};
+
+        var recordForm = document.getElementById('recordForm');
+        var tbody = document.getElementById('recordsBody');
+
+        function escapeHtml(text) {
+            return String(text == null ? '' : text)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        /* ------------------------------------------------- searchable PO picker
+           Same [data-dropdown] contract as purchase_orders.html's initSearchablePicker. */
+        var searchablePanels = [];
+
+        function closeAllOtherDropdowns(exceptPanel) {
+            searchablePanels.forEach(function (p) {
+                if (p !== exceptPanel) p.classList.add('hidden');
+            });
+        }
+
+        function initSearchablePicker(inputId, hiddenId, panelId, items, getId, getLabel) {
+            var input = document.getElementById(inputId);
+            var hidden = document.getElementById(hiddenId);
+            var panel = document.getElementById(panelId);
+            searchablePanels.push(panel);
+
+            function render(filterText) {
+                var term = (filterText || '').trim().toLowerCase();
+                var matches = items.filter(function (item) {
+                    return !term || getLabel(item).toLowerCase().indexOf(term) !== -1;
+                });
+                panel.innerHTML = matches.length
+                    ? matches.map(function (item) {
+                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-id="'
+                            + getId(item) + '" data-name="' + getLabel(item).replace(/"/g, '&quot;') + '">' + getLabel(item) + '</button>';
+                    }).join('')
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matches</p>';
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-id]');
+                if (!btn) return;
+                input.value = btn.getAttribute('data-name');
+                hidden.value = btn.getAttribute('data-id');
+                hidden.dispatchEvent(new Event('change'));
+                panel.classList.add('hidden');
+            });
+
+            input.addEventListener('input', function () {
+                hidden.value = '';
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            input.addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeAllOtherDropdowns(panel);
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            return {
+                reset: function () {
+                    input.value = '';
+                    hidden.value = '';
+                    render('');
+                },
+            };
+        }
+
+        var poPicker = initSearchablePicker(
+            'poSearchInput', 'fieldPurchaseOrderId', 'poOptions', APPROVED_POS,
+            function (po) { return po.id; }, function (po) { return po.poNumber + ' — ' + (po.supplierName || ''); }
+        );
+
+        /* ------------------------------------------------- direction toggle */
+        var stockInFields = document.getElementById('stockInFields');
+        var stockOutFields = document.getElementById('stockOutFields');
+        var careToLabel = document.getElementById('careToLabel');
+
+        document.querySelectorAll('input[name="direction"]').forEach(function (radio) {
+            radio.addEventListener('change', function () {
+                var isIn = this.value === 'in';
+                stockInFields.classList.toggle('hidden', !isIn);
+                stockOutFields.classList.toggle('hidden', isIn);
+                careToLabel.textContent = isIn ? 'Received By' : 'Customer / Care Of';
+            });
+        });
+
+        /* ------------------------------------------------- line items
+           Rows keyed by a minted uid, never array index - same reasoning as
+           purchase_orders.html's items: removing a row must not shift another row's
+           identity mid-edit. Each row carries its own catalog-search picker instance. */
+        var items = [];
+        var itemUidCounter = 0;
+
+        var itemsList = document.getElementById('itemsList');
+        var itemRowTemplate = document.getElementById('itemRowTemplate');
+        var fieldItemsJson = document.getElementById('fieldItemsJson');
+
+        function itemByUid(uid) {
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].uid === uid) return items[i];
+            }
+            return null;
+        }
+
+        function rowFor(uid) {
+            return itemsList.querySelector('.js-item-row[data-item="' + uid + '"]');
+        }
+
+        function makeItem() {
+            itemUidCounter += 1;
+            return {
+                uid: 'i' + itemUidCounter,
+                itemId: null, catalogCode: '', description: '', unit: '', category: '',
+                quantity: '', lot: '', expiryDate: '',
+            };
+        }
+
+        function initItemCatalogPicker(row, item) {
+            var input = row.querySelector('.js-item-catalog-search');
+            var panel = row.querySelector('.js-item-catalog-panel');
+            searchablePanels.push(panel);
+
+            function label(inv) { return inv.catalog + ' — ' + (inv.description || ''); }
+
+            function render(filterText) {
+                var term = (filterText || '').trim().toLowerCase();
+                var matches = !term ? [] : INVENTORY_ITEMS.filter(function (inv) {
+                    return inv.catalog.toLowerCase().indexOf(term) !== -1
+                        || (inv.description || '').toLowerCase().indexOf(term) !== -1;
+                }).slice(0, 30);
+                panel.innerHTML = matches.length
+                    ? matches.map(function (inv, idx) {
+                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-idx="' + idx + '">'
+                            + escapeHtml(label(inv)) + '</button>';
+                    }).join('')
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">Type to search, or just type a description below and use it as-is</p>';
+                panel._matches = matches;
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-idx]');
+                if (!btn || !panel._matches) return;
+                var inv = panel._matches[parseInt(btn.getAttribute('data-idx'), 10)];
+                if (!inv) return;
+                item.itemId = inv.id;
+                item.catalogCode = inv.catalog;
+                item.description = inv.description || '';
+                item.unit = inv.baseUnit || inv.purchaseUnit || inv.salesUnit || '';
+                item.category = inv.category || '';
+                input.value = label(inv);
+                row.querySelector('.js-item-unit').value = item.unit;
+                panel.classList.add('hidden');
+                syncItems();
+            });
+
+            input.addEventListener('input', function () {
+                item.itemId = null;
+                item.catalogCode = '';
+                item.category = '';
+                item.description = input.value;
+                render(input.value);
+                panel.classList.remove('hidden');
+                syncItems();
+            });
+
+            input.addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeAllOtherDropdowns(panel);
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+        }
+
+        function appendItemRow(item) {
+            var frag = itemRowTemplate.content.cloneNode(true);
+            var row = frag.querySelector('.js-item-row');
+            row.setAttribute('data-item', item.uid);
+            itemsList.appendChild(frag);
+            initItemCatalogPicker(rowFor(item.uid), item);
+            OS.refreshIcons();
+        }
+
+        function renumberItems() {
+            var rows = itemsList.querySelectorAll('.js-item-row');
+            rows.forEach(function (row, i) {
+                row.querySelector('.js-item-number').textContent = i + 1;
+                row.querySelector('.js-remove-item').classList.toggle('hidden', rows.length <= 1);
+            });
+        }
+
+        function syncItems() {
+            fieldItemsJson.value = JSON.stringify(items.map(function (it) {
+                return {
+                    itemId: it.itemId, catalogCode: it.catalogCode, description: it.description,
+                    unit: it.unit, category: it.category, quantity: it.quantity,
+                    lot: it.lot, expiryDate: it.expiryDate,
+                };
+            }));
+        }
+
+        function addItem() {
+            var item = makeItem();
+            items.push(item);
+            appendItemRow(item);
+            renumberItems();
+            syncItems();
+            return item;
+        }
+
+        function removeItem(uid) {
+            var row = rowFor(uid);
+            if (row) row.remove();
+            items = items.filter(function (it) { return it.uid !== uid; });
+            renumberItems();
+            syncItems();
+        }
+
+        function resetItems() {
+            items = [];
+            itemsList.innerHTML = '';
+            addItem();
+        }
+
+        itemsList.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-action]');
+            if (!btn) return;
+            var row = btn.closest('.js-item-row');
+            if (!row) return;
+            var uid = row.getAttribute('data-item');
+            if (btn.getAttribute('data-action') === 'remove-item') removeItem(uid);
+        });
+
+        itemsList.addEventListener('input', function (e) {
+            var row = e.target.closest('.js-item-row');
+            if (!row) return;
+            var item = itemByUid(row.getAttribute('data-item'));
+            if (!item) return;
+
+            if (e.target.classList.contains('js-item-unit')) { item.unit = e.target.value; syncItems(); }
+            else if (e.target.classList.contains('js-item-quantity')) { item.quantity = e.target.value; syncItems(); }
+            else if (e.target.classList.contains('js-item-lot')) { item.lot = e.target.value; syncItems(); }
+            else if (e.target.classList.contains('js-item-expiry')) { item.expiryDate = e.target.value; syncItems(); }
+        });
+
+        document.getElementById('addItemBtn').addEventListener('click', function () { addItem(); });
+
+        /* ------------------------------------------------- submit-time validation */
+        recordForm.addEventListener('submit', function (e) {
+            if (!items.length) {
+                e.preventDefault();
+                alert('Add at least one line item before submitting.');
+                return;
+            }
+            for (var i = 0; i < items.length; i++) {
+                var it = items[i], n = i + 1;
+                if (!(it.description || '').trim()) {
+                    e.preventDefault(); alert('Line item ' + n + ' needs a description.'); return;
+                }
+                if (!(parseInt(it.quantity, 10) > 0)) {
+                    e.preventDefault(); alert('Line item ' + n + ' needs a quantity.'); return;
+                }
+            }
+        });
+
+        /* ------------------------------------------------------------- add */
+        document.getElementById('addNewBtn').addEventListener('click', function () {
+            recordForm.reset();
+            document.getElementById('directionIn').checked = true;
+            stockInFields.classList.remove('hidden');
+            stockOutFields.classList.add('hidden');
+            careToLabel.textContent = 'Received By';
+            poPicker.reset();
+            resetItems();
+            OS.openModal('recordModal');
+        });
+
+        /* --------------------------------------------------------- view/verify/finish/delete */
+        function renderViewItems(row) {
+            var wrap = document.getElementById('viewItems');
+            var txnItems = [];
+            try {
+                txnItems = JSON.parse(row.getAttribute('data-items') || '[]');
+            } catch (err) {
+                txnItems = [];
+            }
+            if (!txnItems.length) {
+                wrap.innerHTML = '<p class="text-slate-500 dark:text-slate-400">No line items.</p>';
+                return;
+            }
+            wrap.innerHTML = txnItems.map(function (it, i) {
+                var meta = [];
+                if (it.quantity != null) meta.push(it.quantity + (it.unit ? ' ' + it.unit : ''));
+                if (it.lot) meta.push('Lot ' + it.lot);
+                if (it.expiryDate) meta.push('Exp ' + it.expiryDate);
+                return '<div class="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
+                    + '<div class="flex items-center justify-between gap-2">'
+                    + '<span class="text-xs font-semibold text-slate-900 dark:text-white">' + (i + 1) + '. '
+                    + escapeHtml(it.description || it.catalogCode || '—') + '</span>'
+                    + '<span class="shrink-0 text-xs text-slate-500 dark:text-slate-400">' + meta.join(' · ') + '</span>'
+                    + '</div></div>';
+            }).join('');
+        }
+
+        function openView(row) {
+            document.getElementById('viewDirection').textContent = row.getAttribute('data-direction') === 'IN' ? 'Stock In' : 'Stock Out';
+            document.getElementById('viewStatus').textContent = row.getAttribute('data-status') || '—';
+            var createdAt = row.getAttribute('data-created-at');
+            document.getElementById('viewCreatedAt').textContent = createdAt ? createdAt.slice(0, 10) : '—';
+            document.getElementById('viewBranch').textContent = row.getAttribute('data-branch') || '—';
+            document.getElementById('viewCareTo').textContent = row.getAttribute('data-care-to') || '—';
+
+            var reference = row.getAttribute('data-po-number') ? 'PO ' + row.getAttribute('data-po-number')
+                : row.getAttribute('data-si-number') ? 'SI ' + row.getAttribute('data-si-number')
+                : row.getAttribute('data-dr-number') ? 'DR ' + row.getAttribute('data-dr-number')
+                : row.getAttribute('data-reason') || '—';
+            document.getElementById('viewReference').textContent = reference;
+
+            document.getElementById('viewCreatedBy').textContent = row.getAttribute('data-created-by-name') || '—';
+            document.getElementById('viewVerifiedBy').textContent = row.getAttribute('data-verified-by-name') || '—';
+            document.getElementById('viewFinishedBy').textContent = row.getAttribute('data-finished-by-name') || '—';
+
+            renderViewItems(row);
+
+            var note = row.getAttribute('data-note');
+            document.getElementById('viewNoteWrap').classList.toggle('hidden', !note);
+            document.getElementById('viewNote').textContent = note || '';
+
+            OS.openModal('viewModal');
+        }
+
+        var deleteForm = document.getElementById('deleteForm');
+
+        tbody.addEventListener('click', function (e) {
+            var viewBtn = e.target.closest('.js-view');
+            var verifyBtn = e.target.closest('.js-verify');
+            var finishBtn = e.target.closest('.js-finish');
+            var delBtn = e.target.closest('.js-delete');
+
+            if (viewBtn) openView(viewBtn.closest('tr'));
+            if (verifyBtn && confirm('Verify this transaction?')) {
+                var f1 = document.createElement('form');
+                f1.method = 'POST'; f1.action = verifyBtn.getAttribute('data-url');
+                document.body.appendChild(f1); f1.submit();
+            }
+            if (finishBtn && confirm('Mark this transaction finished?')) {
+                var f2 = document.createElement('form');
+                f2.method = 'POST'; f2.action = finishBtn.getAttribute('data-url');
+                document.body.appendChild(f2); f2.submit();
+            }
+            if (delBtn) {
+                deleteForm.action = '/page/warehouse_transactions/' + delBtn.closest('tr').getAttribute('data-id') + '/delete';
+                OS.openModal('deleteConfirmModal');
+            }
+        });
+
+        /* --------------------------------------------------------------- search */
+        var searchInput = document.getElementById('txnSearch');
+        searchInput.addEventListener('search', function () {
+            if (searchInput.value === '') document.getElementById('searchForm').submit();
+        });
+    })();
+</script>
+{% endblock %}
