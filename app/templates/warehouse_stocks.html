@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}Warehouse Stocks - Office System{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex items-start gap-3">
+        <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                     dark:bg-brand-500/10 dark:text-brand-400">
+            <i data-lucide="boxes" class="h-5 w-5"></i>
+        </span>
+        <div>
+            <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Warehouse Stocks</h1>
+            <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                On-hand quantity per item, computed from finished stock movements.
+            </p>
+        </div>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="boxes" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Items
+            </h2>
+            <div class="flex items-center gap-3">
+                <label class="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                    <input type="checkbox" class="checkbox" id="showZeroStock">
+                    Show zero-stock items
+                </label>
+                <div class="relative">
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" id="stockSearch" placeholder="Search catalog #, description, category…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </div>
+                <span class="badge badge-slate whitespace-nowrap"><span id="stockCount">{{ items|length }}</span> items</span>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[56rem]">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th">Catalog</th>
+                        <th class="table-th">Description</th>
+                        <th class="table-th w-32">Category</th>
+                        <th class="table-th w-24">Unit</th>
+                        <th class="table-th w-28">On Hand</th>
+                        <th class="table-th w-20 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for item in items %}
+                    <tr class="table-row {{ 'js-zero-stock hidden' if item.onHand == 0 else '' }}"
+                        data-catalog="{{ item.catalogCode or '' }}"
+                        data-description="{{ item.description or '' }}"
+                        data-category="{{ item.category or '' }}"
+                        data-on-hand="{{ item.onHand }}"
+                        {# single-quoted: Flask's tojson escapes < > & ' but NOT ", and JSON
+                           is full of " - double quotes here would end the attribute early
+                           and corrupt the row's markup #}
+                        data-lots='{{ item.lots|tojson }}'>
+                        <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">{{ item.catalogCode or '—' }}</td>
+                        <td class="table-td truncate">{{ item.description or '—' }}</td>
+                        <td class="table-td text-sm">{{ item.category or '—' }}</td>
+                        <td class="table-td text-sm">{{ item.unit or '—' }}</td>
+                        <td class="table-td">
+                            <span class="badge {{ 'badge-slate' if item.onHand == 0 else 'badge-success' }}">
+                                {{ '{:,}'.format(item.onHand) }}
+                            </span>
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-view" title="View breakdown" aria-label="View stock breakdown">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="boxes" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No finished stock movements yet</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div id="noSearchResults" class="hidden px-5 py-14 text-center">
+            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                <i data-lucide="search-x" class="h-6 w-6"></i>
+            </span>
+            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No items match your search</p>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== View breakdown modal ===================== -->
+<div id="viewModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <div class="min-w-0">
+                <h3 class="modal-title">Stock Breakdown</h3>
+                <p class="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400" id="viewSubtitle"></p>
+            </div>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-slate-50 dark:bg-slate-800/50">
+                        <tr>
+                            <th class="table-th">Branch</th>
+                            <th class="table-th">Lot</th>
+                            <th class="table-th">Expiry</th>
+                            <th class="table-th text-right">On Hand</th>
+                        </tr>
+                    </thead>
+                    <tbody id="viewLotsBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var tbody = document.getElementById('recordsBody');
+
+        function escapeHtml(text) {
+            return String(text == null ? '' : text)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        /* ------------------------------------------------------------- view */
+        tbody.addEventListener('click', function (e) {
+            var viewBtn = e.target.closest('.js-view');
+            if (!viewBtn) return;
+            var row = viewBtn.closest('tr');
+
+            document.getElementById('viewSubtitle').textContent =
+                (row.getAttribute('data-catalog') || '—') + ' — ' + (row.getAttribute('data-description') || '');
+
+            var lots = [];
+            try {
+                lots = JSON.parse(row.getAttribute('data-lots') || '[]');
+            } catch (err) {
+                lots = [];
+            }
+            var body = document.getElementById('viewLotsBody');
+            body.innerHTML = lots.length ? lots.map(function (l) {
+                return '<tr class="table-row">'
+                    + '<td class="table-td">' + escapeHtml(l.branch || '—') + '</td>'
+                    + '<td class="table-td font-mono text-xs">' + escapeHtml(l.lot || '—') + '</td>'
+                    + '<td class="table-td">' + escapeHtml(l.expiryDate || '—') + '</td>'
+                    + '<td class="table-td text-right">' + Number(l.onHand).toLocaleString() + '</td>'
+                    + '</tr>';
+            }).join('') : '<tr><td colspan="4" class="table-td text-center text-slate-400">No breakdown available</td></tr>';
+
+            OS.openModal('viewModal');
+        });
+
+        /* ------------------------------------------------------- zero-stock toggle */
+        var showZeroStock = document.getElementById('showZeroStock');
+        showZeroStock.addEventListener('change', function () {
+            tbody.querySelectorAll('tr.js-zero-stock').forEach(function (row) {
+                // Only override visibility when the row isn't already hidden by an active
+                // search filter - re-running the search filter after toggling keeps the
+                // two controls from fighting each other.
+                row.classList.toggle('hidden', !showZeroStock.checked);
+            });
+            search.dispatchEvent(new Event('input'));
+        });
+
+        /* ----------------------------------------------------------- search */
+        var search = document.getElementById('stockSearch');
+        var noResults = document.getElementById('noSearchResults');
+
+        search.addEventListener('input', function () {
+            var term = search.value.trim().toLowerCase();
+            var shown = 0;
+            tbody.querySelectorAll('tr[data-catalog]').forEach(function (row) {
+                var isZero = row.classList.contains('js-zero-stock');
+                if (isZero && !showZeroStock.checked) {
+                    row.classList.add('hidden');
+                    return;
+                }
+                var haystack = (
+                    (row.getAttribute('data-catalog') || '') + ' ' +
+                    (row.getAttribute('data-description') || '') + ' ' +
+                    (row.getAttribute('data-category') || '')
+                ).toLowerCase();
+                var match = !term || haystack.indexOf(term) !== -1;
+                row.classList.toggle('hidden', !match);
+                if (match) shown++;
+            });
+            document.getElementById('stockCount').textContent = shown;
+            noResults.classList.toggle('hidden', shown > 0);
+        });
+
+        // Zero-stock rows start hidden server-side (checkbox defaults unchecked), but the
+        // count badge still shows the Jinja-rendered total until something fires the
+        // filter - sync it once up front so it reflects what's actually visible.
+        search.dispatchEvent(new Event('input'));
+    })();
+</script>
+{% endblock %}

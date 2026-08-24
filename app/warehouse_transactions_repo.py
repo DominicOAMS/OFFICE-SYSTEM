@@ -235,3 +235,43 @@ def finish(txn_id, finished_by):
             )
     finally:
         conn.close()
+
+
+def list_stock_balances():
+    """On-hand quantity per (item, branch, lot, expiry), computed fresh from Finished
+    transactions - never stored. Only 'Finished' counts: Created/Verified movements
+    haven't been confirmed as physically real yet, so they shouldn't move what's shown as
+    available. Each group is clamped to a floor of zero individually (GREATEST, not after
+    summing across lots) so one over-issued lot can't be net-cancelled into invisibility
+    by a healthy lot of the same item - the legacy snapshot had 13 such negative lots,
+    real evidence of historical over-issuance that a naive item-level SUM would hide.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    wi.itemId,
+                    COALESCE(inv.catalog, wi.catalogCode) AS catalogCode,
+                    COALESCE(inv.description, wi.description) AS description,
+                    COALESCE(inv.category, wi.category) AS category,
+                    wi.unit,
+                    wt.branch,
+                    wi.lot,
+                    wi.expiryDate,
+                    GREATEST(0, COALESCE(SUM(
+                        CASE WHEN wt.direction = 'IN' THEN wi.quantity ELSE -wi.quantity END
+                    ), 0)) AS onHand
+                FROM tbl_warehouse_transaction_items wi
+                JOIN tbl_warehouse_transactions wt ON wt.id = wi.transactionId
+                LEFT JOIN tbl_inventory_items inv ON inv.id = wi.itemId
+                WHERE wt.status = 'Finished' AND wt.isDeleted = 0
+                GROUP BY wi.itemId, catalogCode, description, category, wi.unit,
+                         wt.branch, wi.lot, wi.expiryDate
+                ORDER BY catalogCode ASC
+                """
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()

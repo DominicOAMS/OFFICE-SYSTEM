@@ -1632,6 +1632,43 @@ def warehouse_transaction_finish(txn_id):
     return redirect(url_for("main.warehouse_transactions"))
 
 
+@main_bp.route("/page/warehouse_stocks")
+@login_required
+def warehouse_stocks():
+    """Read-only computed report - no querystring params, no pagination, matching
+    customers()/suppliers()'s "render the whole master-data table, filter client-side"
+    shape rather than the transactional Fuel PO/PO/Warehouse Transaction list pattern.
+    Stocks is a report over data, not a queue of records someone works through."""
+    lots = warehouse_transactions_repo.list_stock_balances()
+
+    items_by_key = {}
+    for lot in lots:
+        key = ("id", lot["itemId"]) if lot["itemId"] else ("text", lot["catalogCode"], lot["description"])
+        item = items_by_key.setdefault(
+            key,
+            {
+                "catalogCode": lot["catalogCode"],
+                "description": lot["description"],
+                "category": lot["category"],
+                "unit": lot["unit"],
+                "onHand": 0,
+                "lots": [],
+            },
+        )
+        item["onHand"] += lot["onHand"]
+        item["lots"].append(
+            {
+                "branch": lot["branch"],
+                "lot": lot["lot"],
+                "expiryDate": lot["expiryDate"].strftime("%b %d, %Y") if lot["expiryDate"] else None,
+                "onHand": lot["onHand"],
+            }
+        )
+
+    items = sorted(items_by_key.values(), key=lambda i: (i["catalogCode"] or "", i["description"] or ""))
+    return render_template("warehouse_stocks.html", items=items)
+
+
 @main_bp.route("/page/<slug>")
 @login_required
 def page(slug):
