@@ -156,6 +156,103 @@ def create_transaction(data, created_by):
         conn.close()
 
 
+def update_transaction(txn_id, data, updated_by):
+    """Replace the header fields and every line item in one transaction.
+
+    Editing is only ever offered for a still-'Created' record (enforced by the route, not
+    here) - a Verified/Finished transaction represents a physical event that already
+    happened, so rewriting its items after the fact would misrepresent history. Items are
+    fully replaced (delete-then-reinsert) rather than diffed, matching how the Add form
+    always submits a complete list rather than incremental changes - same reasoning as
+    create_transaction's all-or-nothing insert.
+    """
+    conn = get_connection()
+    try:
+        conn.begin()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tbl_warehouse_transactions
+                SET direction = %s, reason = %s, careTo = %s, note = %s,
+                    purchaseOrderId = %s, poNumber = %s, siNumber = %s, customerPo = %s,
+                    supplierInvoice = %s, drNumber = %s, supplierDrNumber = %s, branch = %s,
+                    updatedBy = %s, updatedAt = NOW()
+                WHERE id = %s
+                """,
+                (
+                    data["direction"],
+                    data["reason"],
+                    data["careTo"],
+                    data["note"],
+                    data["purchaseOrderId"],
+                    data["poNumber"],
+                    data["siNumber"],
+                    data["customerPo"],
+                    data["supplierInvoice"],
+                    data["drNumber"],
+                    data["supplierDrNumber"],
+                    data["branch"],
+                    updated_by,
+                    txn_id,
+                ),
+            )
+
+            cur.execute("DELETE FROM tbl_warehouse_transaction_items WHERE transactionId = %s", (txn_id,))
+
+            for seq, item in enumerate(data["items"], start=1):
+                cur.execute(
+                    """
+                    INSERT INTO tbl_warehouse_transaction_items
+                        (transactionId, sequence, itemId, catalogCode, description, unit,
+                         category, quantity, lot, expiryDate)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        txn_id,
+                        seq,
+                        item["itemId"],
+                        item["catalogCode"],
+                        item["description"],
+                        item["unit"],
+                        item["category"],
+                        item["quantity"],
+                        item["lot"],
+                        item["expiryDate"],
+                    ),
+                )
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def list_last_supplier_invoice_by_supplier():
+    """The highest purely-numeric supplierInvoice recorded so far for each supplier
+    (via the linked Purchase Order), so the Add form can suggest the next one. Supplier
+    invoice numbers are the SUPPLIER's own numbering, not ours, so this is scoped per
+    supplier - a global max would suggest a nonsense value for the next supplier picked
+    (one supplier's invoices run ~955000000, another's run ~180822000000).
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT po.supplierId, MAX(CAST(wt.supplierInvoice AS UNSIGNED)) AS lastNumber
+                FROM tbl_warehouse_transactions wt
+                JOIN tbl_purchase_orders po ON po.id = wt.purchaseOrderId
+                WHERE wt.supplierInvoice REGEXP '^[0-9]+$' AND wt.isDeleted = 0
+                GROUP BY po.supplierId
+                """
+            )
+            return {row["supplierId"]: row["lastNumber"] for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+
 def list_items_for_transactions(txn_ids):
     """Every line item for a page of transactions, keyed by transactionId. Always exactly
     one query no matter how many transactions are on the page - same shape as

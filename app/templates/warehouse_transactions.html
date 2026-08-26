@@ -90,6 +90,7 @@
                         data-direction="{{ t.direction }}"
                         data-reason="{{ t.reason }}"
                         data-created-at="{{ t.createdAt }}"
+                        data-purchase-order-id="{{ t.purchaseOrderId or '' }}"
                         data-po-number="{{ t.poNumber or '' }}"
                         data-si-number="{{ t.siNumber or '' }}"
                         data-dr-number="{{ t.drNumber or '' }}"
@@ -142,6 +143,10 @@
                                 </button>
                                 {% endif %}
                                 {% if t.status == 'Created' and session.get('user_id') == t.createdBy %}
+                                <button type="button" class="btn btn-icon btn-ghost js-edit"
+                                        title="Edit" aria-label="Edit Transaction">
+                                    <i data-lucide="pencil" class="h-4 w-4"></i>
+                                </button>
                                 <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-delete"
                                         title="Delete" aria-label="Delete Transaction">
                                     <i data-lucide="trash-2" class="h-4 w-4"></i>
@@ -231,7 +236,7 @@
     <div class="modal-panel max-w-3xl">
         <form id="recordForm" method="POST" action="{{ url_for('main.warehouse_transaction_add') }}">
             <div class="modal-header">
-                <h3 class="modal-title">Add Transaction</h3>
+                <h3 class="modal-title" id="recordModalTitle">Add Transaction</h3>
                 <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
                     <i data-lucide="x" class="h-4 w-4"></i>
                 </button>
@@ -321,7 +326,7 @@
 
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
-                <button type="submit" class="btn btn-primary">
+                <button type="submit" class="btn btn-primary" id="recordSubmitBtn">
                     <i data-lucide="send" class="h-4 w-4"></i>Record Transaction
                 </button>
             </div>
@@ -516,18 +521,39 @@
             function (po) { return po.id; }, function (po) { return po.poNumber + ' — ' + (po.supplierName || ''); }
         );
 
+        var LAST_SUPPLIER_INVOICE = {{ last_supplier_invoice_by_supplier|tojson }};
+        var fieldSupplierInvoice = document.getElementById('fieldSupplierInvoice');
+
+        // Supplier invoice numbers are the SUPPLIER's own numbering, not ours - one
+        // supplier's series might run ~955000000 and another's ~180822000000, so the
+        // suggestion is scoped to whichever PO's supplier was just picked, and only ever
+        // offered into an EMPTY field so it can't clobber something already typed
+        // (including while editing an existing transaction's own recorded number).
+        var fieldPurchaseOrderId = document.getElementById('fieldPurchaseOrderId');
+        fieldPurchaseOrderId.addEventListener('change', function () {
+            if (fieldSupplierInvoice.value.trim()) return;
+            var selectedId = fieldPurchaseOrderId.value;
+            var po = APPROVED_POS.find(function (p) { return String(p.id) === selectedId; });
+            if (!po) return;
+            var last = LAST_SUPPLIER_INVOICE[po.supplierId];
+            if (last != null) fieldSupplierInvoice.value = last + 1;
+        });
+
         /* ------------------------------------------------- direction toggle */
         var stockInFields = document.getElementById('stockInFields');
         var stockOutFields = document.getElementById('stockOutFields');
         var careToLabel = document.getElementById('careToLabel');
 
+        function applyDirection(value) {
+            var isIn = value === 'in';
+            document.getElementById(isIn ? 'directionIn' : 'directionOut').checked = true;
+            stockInFields.classList.toggle('hidden', !isIn);
+            stockOutFields.classList.toggle('hidden', isIn);
+            careToLabel.textContent = isIn ? 'Received By' : 'Customer / Care Of';
+        }
+
         document.querySelectorAll('input[name="direction"]').forEach(function (radio) {
-            radio.addEventListener('change', function () {
-                var isIn = this.value === 'in';
-                stockInFields.classList.toggle('hidden', !isIn);
-                stockOutFields.classList.toggle('hidden', isIn);
-                careToLabel.textContent = isIn ? 'Received By' : 'Customer / Care Of';
-            });
+            radio.addEventListener('change', function () { applyDirection(this.value); });
         });
 
         /* ------------------------------------------------- line items
@@ -667,6 +693,42 @@
             addItem();
         }
 
+        // Rebuilds the whole list from an existing transaction's data-items JSON, for
+        // Edit. Reuses makeItem() for uid-minting rather than duplicating it, then
+        // overwrites the blank fields with the real data before rendering each row -
+        // appendItemRow() only wires up the picker, it doesn't populate values, since a
+        // freshly-added row is always blank until the user types or picks something.
+        function loadItems(list) {
+            items = [];
+            itemsList.innerHTML = '';
+            var source = (list && list.length) ? list : [null];
+            source.forEach(function (data) {
+                var item = makeItem();
+                if (data) {
+                    item.itemId = data.itemId || null;
+                    item.catalogCode = data.catalogCode || '';
+                    item.description = data.description || '';
+                    item.unit = data.unit || '';
+                    item.category = data.category || '';
+                    item.quantity = data.quantity != null ? String(data.quantity) : '';
+                    item.lot = data.lot || '';
+                    item.expiryDate = data.expiryDate || '';
+                }
+                items.push(item);
+                appendItemRow(item);
+                var row = rowFor(item.uid);
+                row.querySelector('.js-item-catalog-search').value = item.catalogCode
+                    ? item.catalogCode + ' — ' + item.description
+                    : item.description;
+                row.querySelector('.js-item-unit').value = item.unit;
+                row.querySelector('.js-item-quantity').value = item.quantity;
+                row.querySelector('.js-item-lot').value = item.lot;
+                row.querySelector('.js-item-expiry').value = item.expiryDate;
+            });
+            renumberItems();
+            syncItems();
+        }
+
         itemsList.addEventListener('click', function (e) {
             var btn = e.target.closest('[data-action]');
             if (!btn) return;
@@ -708,17 +770,70 @@
             }
         });
 
-        /* ------------------------------------------------------------- add */
+        /* ------------------------------------------------------------- add / edit */
+        var recordModalTitle = document.getElementById('recordModalTitle');
+        var recordSubmitBtn = document.getElementById('recordSubmitBtn');
+        var addUrl = "{{ url_for('main.warehouse_transaction_add') }}";
+        function editUrl(id) { return '/page/warehouse_transactions/' + id + '/edit'; }
+
+        function formatDateDisplay(iso) {
+            if (!iso) return '';
+            var parts = iso.split('-');
+            if (parts.length !== 3) return iso;
+            var d = new Date(Date.UTC(+parts[0], +parts[1] - 1, +parts[2]));
+            return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+        }
+
         document.getElementById('addNewBtn').addEventListener('click', function () {
             recordForm.reset();
-            document.getElementById('directionIn').checked = true;
-            stockInFields.classList.remove('hidden');
-            stockOutFields.classList.add('hidden');
-            careToLabel.textContent = 'Received By';
+            recordForm.action = addUrl;
+            recordModalTitle.textContent = 'Add Transaction';
+            recordSubmitBtn.innerHTML = '<i data-lucide="send" class="h-4 w-4"></i>Record Transaction';
+            applyDirection('in');
             poPicker.reset();
             resetItems();
+            OS.refreshIcons();
             OS.openModal('recordModal');
         });
+
+        function openEdit(row) {
+            recordForm.action = editUrl(row.getAttribute('data-id'));
+            recordModalTitle.textContent = 'Edit Transaction';
+            recordSubmitBtn.innerHTML = '<i data-lucide="check" class="h-4 w-4"></i>Save Changes';
+
+            var direction = row.getAttribute('data-direction') === 'IN' ? 'in' : 'out';
+            applyDirection(direction);
+
+            var poId = row.getAttribute('data-purchase-order-id');
+            if (poId) {
+                var po = APPROVED_POS.find(function (p) { return String(p.id) === poId; });
+                document.getElementById('poSearchInput').value = po
+                    ? (po.poNumber + ' — ' + (po.supplierName || ''))
+                    : ('PO ' + row.getAttribute('data-po-number'));
+                document.getElementById('fieldPurchaseOrderId').value = poId;
+            } else {
+                poPicker.reset();
+            }
+            document.getElementById('fieldSupplierInvoice').value = row.getAttribute('data-supplier-invoice') || '';
+            document.getElementById('fieldSiNumber').value = row.getAttribute('data-si-number') || '';
+            document.getElementById('fieldDrNumber').value = row.getAttribute('data-dr-number') || '';
+            document.getElementById('fieldCustomerPo').value = row.getAttribute('data-customer-po') || '';
+            document.getElementById('fieldSupplierDrNumber').value = row.getAttribute('data-supplier-dr-number') || '';
+            document.getElementById('fieldCareTo').value = row.getAttribute('data-care-to') || '';
+            document.getElementById('fieldBranch').value = row.getAttribute('data-branch') || '';
+            document.getElementById('fieldNote').value = row.getAttribute('data-note') || '';
+
+            var txnItems = [];
+            try {
+                txnItems = JSON.parse(row.getAttribute('data-items') || '[]');
+            } catch (err) {
+                txnItems = [];
+            }
+            loadItems(txnItems);
+
+            OS.refreshIcons();
+            OS.openModal('recordModal');
+        }
 
         /* --------------------------------------------------------- view/verify/finish/delete */
         function renderViewItems(row) {
@@ -737,7 +852,7 @@
                 var meta = [];
                 if (it.quantity != null) meta.push(it.quantity + (it.unit ? ' ' + it.unit : ''));
                 if (it.lot) meta.push('Lot ' + it.lot);
-                if (it.expiryDate) meta.push('Exp ' + it.expiryDate);
+                if (it.expiryDate) meta.push('Exp ' + formatDateDisplay(it.expiryDate));
                 return '<div class="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
                     + '<div class="flex items-center justify-between gap-2">'
                     + '<span class="text-xs font-semibold text-slate-900 dark:text-white">' + (i + 1) + '. '
@@ -778,11 +893,13 @@
 
         tbody.addEventListener('click', function (e) {
             var viewBtn = e.target.closest('.js-view');
+            var editBtn = e.target.closest('.js-edit');
             var verifyBtn = e.target.closest('.js-verify');
             var finishBtn = e.target.closest('.js-finish');
             var delBtn = e.target.closest('.js-delete');
 
             if (viewBtn) openView(viewBtn.closest('tr'));
+            if (editBtn) openEdit(editBtn.closest('tr'));
             if (verifyBtn && confirm('Verify this transaction?')) {
                 var f1 = document.createElement('form');
                 f1.method = 'POST'; f1.action = verifyBtn.getAttribute('data-url');

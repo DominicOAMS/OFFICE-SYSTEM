@@ -1439,16 +1439,20 @@ MAX_TXN_ITEMS = 50
 
 
 def _txn_item_for_view(item):
-    """Display-ready primitives for the View modal's line-item breakdown - same reasoning
-    as _item_for_view: Decimal/date don't serialize the way a human wants via |tojson."""
+    """JSON-safe primitives for the View modal's line-item breakdown AND the Edit form's
+    prefill (same data-items attribute feeds both) - Decimal/date don't serialize the way
+    either one needs via |tojson. expiryDate is ISO (YYYY-MM-DD) rather than display-
+    formatted specifically because Edit sets it straight into an <input type="date">,
+    which requires that exact format; the View modal formats it for display in JS instead."""
     return {
+        "itemId": item["itemId"],
         "catalogCode": item["catalogCode"],
         "description": item["description"],
         "unit": item["unit"],
         "category": item["category"],
         "quantity": item["quantity"],
         "lot": item["lot"],
-        "expiryDate": item["expiryDate"].strftime("%b %d, %Y") if item["expiryDate"] else None,
+        "expiryDate": item["expiryDate"].isoformat() if item["expiryDate"] else None,
     }
 
 
@@ -1487,6 +1491,7 @@ def warehouse_transactions():
         items_by_txn=items_by_txn,
         approved_purchase_orders=purchase_orders_repo.list_purchase_orders(status="Approved"),
         inventory_items=purchase_orders_repo.list_active_inventory_items(),
+        last_supplier_invoice_by_supplier=warehouse_transactions_repo.list_last_supplier_invoice_by_supplier(),
         search=search,
         direction=direction,
         status=status,
@@ -1589,6 +1594,33 @@ def warehouse_transaction_add():
         return redirect(url_for("main.warehouse_transactions"))
 
     flash(f"Stock {'In' if data['direction'] == 'IN' else 'Out'} #{transaction_id:06d} recorded.", "success")
+    return redirect(url_for("main.warehouse_transactions"))
+
+
+@main_bp.route("/page/warehouse_transactions/<int:txn_id>/edit", methods=["POST"])
+@login_required
+def warehouse_transaction_edit(txn_id):
+    txn = warehouse_transactions_repo.get_transaction(txn_id)
+    if not txn:
+        abort(404)
+    # Same gate as delete: only the creator, and only while still Created - Verifying/
+    # Finishing represents a physical event that already happened, so rewriting it
+    # afterward would misrepresent history.
+    if txn["createdBy"] != session.get("user_id") or txn["status"] != "Created":
+        abort(403)
+
+    data = _parse_warehouse_transaction_form()
+    if not data["items"]:
+        flash("Add at least one line item — every item needs a description and quantity.", "error")
+        return redirect(url_for("main.warehouse_transactions"))
+
+    try:
+        warehouse_transactions_repo.update_transaction(txn_id, data, updated_by=session.get("user_id"))
+    except (IntegrityError, DataError):
+        flash("Could not save — one of the selected records no longer exists, or a value was too long to save.", "error")
+        return redirect(url_for("main.warehouse_transactions"))
+
+    flash(f"Stock {'In' if data['direction'] == 'IN' else 'Out'} #{txn_id:06d} updated.", "success")
     return redirect(url_for("main.warehouse_transactions"))
 
 
