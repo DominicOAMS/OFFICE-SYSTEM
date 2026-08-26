@@ -1,22 +1,28 @@
 {% extends "base.html" %}
 
-{% block title %}Warehouse Stocks - Office System{% endblock %}
+{% block title %}Inventory - Office System{% endblock %}
 
 {% block content %}
 <div class="px-4 py-6 sm:px-6">
 
     <!-- Page header -->
-    <div class="mb-6 flex items-start gap-3">
-        <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
-                     dark:bg-brand-500/10 dark:text-brand-400">
-            <i data-lucide="boxes" class="h-5 w-5"></i>
-        </span>
-        <div>
-            <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Warehouse Stocks</h1>
-            <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
-                On-hand quantity per item, computed from finished stock movements.
-            </p>
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="boxes" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Inventory</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    The item catalog, with on-hand quantity computed live from finished stock movements.
+                </p>
+            </div>
         </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Add Item
+        </button>
     </div>
 
     <div class="card overflow-hidden">
@@ -48,16 +54,23 @@
                         <th class="table-th">Description</th>
                         <th class="table-th w-32">Category</th>
                         <th class="table-th w-24">Unit</th>
-                        <th class="table-th w-28">On Hand</th>
-                        <th class="table-th w-20 text-right">Actions</th>
+                        <th class="table-th w-32">On Hand</th>
+                        <th class="table-th w-28 text-right">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="recordsBody">
                     {% for item in items %}
                     <tr class="table-row {{ 'js-zero-stock hidden' if item.onHand == 0 else '' }}"
+                        data-id="{{ item.itemId or '' }}"
                         data-catalog="{{ item.catalogCode or '' }}"
                         data-description="{{ item.description or '' }}"
                         data-category="{{ item.category or '' }}"
+                        data-group-type="{{ item.groupType or '' }}"
+                        data-base-unit="{{ item.baseUnit or '' }}"
+                        data-sales-unit="{{ item.salesUnit or '' }}"
+                        data-purchase-unit="{{ item.purchaseUnit or '' }}"
+                        data-pack-size="{{ item.packSize or '' }}"
+                        data-status="{{ item.status or '' }}"
                         data-on-hand="{{ item.onHand }}"
                         {# single-quoted: Flask's tojson escapes < > & ' but NOT ", and JSON
                            is full of " - double quotes here would end the attribute early
@@ -69,14 +82,26 @@
                         <td class="table-td text-sm">{{ item.unit or '—' }}</td>
                         <td class="table-td">
                             <span class="badge {{ 'badge-slate' if item.onHand == 0 else 'badge-success' }}">
-                                {{ '{:,}'.format(item.onHand) }}
+                                {{ '{:,}'.format(item.onHand) }}{% if item.unit %} {{ item.unit }}{% endif %}
                             </span>
+                            {% if item.onHandBoxes %}
+                            <p class="mt-0.5 text-[11px] text-slate-400">{{ '{:,}'.format(item.onHandBoxes) }} {{ item.purchaseUnit }}{{ 's' if item.onHandBoxes != 1 else '' }}</p>
+                            {% endif %}
                         </td>
                         <td class="table-td">
                             <div class="flex items-center justify-end gap-1">
                                 <button type="button" class="btn btn-icon btn-ghost js-view" title="View breakdown" aria-label="View stock breakdown">
                                     <i data-lucide="eye" class="h-4 w-4"></i>
                                 </button>
+                                {% if item.itemId %}
+                                <button type="button" class="btn btn-icon btn-ghost js-edit" title="Edit item" aria-label="Edit item">
+                                    <i data-lucide="pencil" class="h-4 w-4"></i>
+                                </button>
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-delete"
+                                        title="Delete item" aria-label="Delete item">
+                                    <i data-lucide="trash-2" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
                             </div>
                         </td>
                     </tr>
@@ -86,7 +111,7 @@
                             <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
                                 <i data-lucide="boxes" class="h-6 w-6"></i>
                             </span>
-                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No finished stock movements yet</p>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No items yet</p>
                         </td>
                     </tr>
                     {% endfor %}
@@ -100,6 +125,125 @@
             </span>
             <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No items match your search</p>
         </div>
+    </div>
+</div>
+
+<!-- ===================== Add / Edit item modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-2xl">
+        <form id="recordForm" method="POST" action="{{ url_for('main.warehouse_stocks_item_add') }}">
+            <div class="modal-header">
+                <h3 class="modal-title" id="recordModalTitle">Add Item</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-5">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                        <label class="label" for="fieldCatalog">Catalog # <span class="text-accent-600">*</span></label>
+                        <input type="text" class="input" id="fieldCatalog" name="catalog" required>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldStatus">Status</label>
+                        <select class="input" id="fieldStatus" name="status">
+                            <option value="AC">Active</option>
+                            <option value="IN">Inactive</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="label" for="fieldDescription">Description <span class="text-accent-600">*</span></label>
+                    <input type="text" class="input" id="fieldDescription" name="description" required>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                        <label class="label" for="fieldCategory">Category</label>
+                        <input type="text" class="input" id="fieldCategory" name="category" list="categoryOptions">
+                        <datalist id="categoryOptions">
+                            {% for c in distinct_categories %}<option value="{{ c }}">{% endfor %}
+                        </datalist>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldGroupType">Group Type</label>
+                        <input type="text" class="input" id="fieldGroupType" name="groupType" list="groupTypeOptions">
+                        <datalist id="groupTypeOptions">
+                            {% for g in distinct_group_types %}<option value="{{ g }}">{% endfor %}
+                        </datalist>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div>
+                        <label class="label" for="fieldBaseUnit">Base Unit</label>
+                        <input type="text" class="input" id="fieldBaseUnit" name="baseUnit" placeholder="e.g. PCS">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldSalesUnit">Sales Unit</label>
+                        <input type="text" class="input" id="fieldSalesUnit" name="salesUnit">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldPurchaseUnit">Purchase Unit</label>
+                        <input type="text" class="input" id="fieldPurchaseUnit" name="purchaseUnit" placeholder="e.g. BOX">
+                    </div>
+                </div>
+
+                <div id="packSizeWrap">
+                    <label class="label" for="fieldPackSize">
+                        Units per <span id="packSizeUnitLabel">Purchase Unit</span>
+                    </label>
+                    <input type="number" class="input" id="fieldPackSize" name="packSize" min="1" step="1" placeholder="e.g. 10">
+                    <p class="help">
+                        Leave blank if this item has no box/pack concept - Stock In/Out will then only accept the Base Unit.
+                    </p>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary" id="recordSubmitBtn">
+                    <i data-lucide="check" class="h-4 w-4"></i>Save
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== Delete item confirm modal ===================== -->
+<div id="deleteConfirmModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="deleteForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title">Delete Item</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="px-5 py-5">
+                <div class="flex items-start gap-3">
+                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+                        <i data-lucide="triangle-alert" class="h-5 w-5"></i>
+                    </span>
+                    <div>
+                        <p class="text-sm font-medium text-slate-900 dark:text-white">
+                            Delete <span id="deleteTargetName">this item</span>?
+                        </p>
+                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                            Its transaction history stays on record but the item is removed from the catalog.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-danger">
+                    <i data-lucide="trash-2" class="h-4 w-4"></i>Delete
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -141,6 +285,11 @@
 <script>
     (function () {
         var tbody = document.getElementById('recordsBody');
+        var recordForm = document.getElementById('recordForm');
+        var recordModalTitle = document.getElementById('recordModalTitle');
+        var addUrl = "{{ url_for('main.warehouse_stocks_item_add') }}";
+        function editUrl(id) { return '/page/warehouse_stocks/items/' + id + '/edit'; }
+        function deleteUrl(id) { return '/page/warehouse_stocks/items/' + id + '/delete'; }
 
         function escapeHtml(text) {
             return String(text == null ? '' : text)
@@ -148,32 +297,80 @@
                 .replace(/"/g, '&quot;');
         }
 
-        /* ------------------------------------------------------------- view */
+        /* ------------------------------------------------------------- add / edit item */
+        var fieldPurchaseUnit = document.getElementById('fieldPurchaseUnit');
+        var packSizeUnitLabel = document.getElementById('packSizeUnitLabel');
+
+        function syncPackSizeLabel() {
+            packSizeUnitLabel.textContent = fieldPurchaseUnit.value.trim() || 'Purchase Unit';
+        }
+        fieldPurchaseUnit.addEventListener('input', syncPackSizeLabel);
+
+        function openAdd() {
+            recordForm.reset();
+            recordForm.action = addUrl;
+            recordModalTitle.textContent = 'Add Item';
+            syncPackSizeLabel();
+            OS.openModal('recordModal');
+        }
+
+        function openEdit(row) {
+            recordForm.action = editUrl(row.getAttribute('data-id'));
+            recordModalTitle.textContent = 'Edit Item';
+            document.getElementById('fieldCatalog').value = row.getAttribute('data-catalog') || '';
+            document.getElementById('fieldDescription').value = row.getAttribute('data-description') || '';
+            document.getElementById('fieldCategory').value = row.getAttribute('data-category') || '';
+            document.getElementById('fieldGroupType').value = row.getAttribute('data-group-type') || '';
+            document.getElementById('fieldBaseUnit').value = row.getAttribute('data-base-unit') || '';
+            document.getElementById('fieldSalesUnit').value = row.getAttribute('data-sales-unit') || '';
+            fieldPurchaseUnit.value = row.getAttribute('data-purchase-unit') || '';
+            document.getElementById('fieldPackSize').value = row.getAttribute('data-pack-size') || '';
+            document.getElementById('fieldStatus').value = row.getAttribute('data-status') || 'AC';
+            syncPackSizeLabel();
+            OS.openModal('recordModal');
+        }
+
+        document.getElementById('addNewBtn').addEventListener('click', openAdd);
+
+        /* ------------------------------------------------------------- view / edit / delete */
+        var deleteForm = document.getElementById('deleteForm');
+
         tbody.addEventListener('click', function (e) {
             var viewBtn = e.target.closest('.js-view');
-            if (!viewBtn) return;
-            var row = viewBtn.closest('tr');
+            var editBtn = e.target.closest('.js-edit');
+            var delBtn = e.target.closest('.js-delete');
+            var row = (viewBtn || editBtn || delBtn) ? (viewBtn || editBtn || delBtn).closest('tr') : null;
 
-            document.getElementById('viewSubtitle').textContent =
-                (row.getAttribute('data-catalog') || '—') + ' — ' + (row.getAttribute('data-description') || '');
+            if (viewBtn) {
+                document.getElementById('viewSubtitle').textContent =
+                    (row.getAttribute('data-catalog') || '—') + ' — ' + (row.getAttribute('data-description') || '');
 
-            var lots = [];
-            try {
-                lots = JSON.parse(row.getAttribute('data-lots') || '[]');
-            } catch (err) {
-                lots = [];
+                var lots = [];
+                try {
+                    lots = JSON.parse(row.getAttribute('data-lots') || '[]');
+                } catch (err) {
+                    lots = [];
+                }
+                var body = document.getElementById('viewLotsBody');
+                body.innerHTML = lots.length ? lots.map(function (l) {
+                    return '<tr class="table-row">'
+                        + '<td class="table-td">' + escapeHtml(l.branch || '—') + '</td>'
+                        + '<td class="table-td font-mono text-xs">' + escapeHtml(l.lot || '—') + '</td>'
+                        + '<td class="table-td">' + escapeHtml(l.expiryDate || '—') + '</td>'
+                        + '<td class="table-td text-right">' + Number(l.onHand).toLocaleString() + '</td>'
+                        + '</tr>';
+                }).join('') : '<tr><td colspan="4" class="table-td text-center text-slate-400">No breakdown available</td></tr>';
+
+                OS.openModal('viewModal');
             }
-            var body = document.getElementById('viewLotsBody');
-            body.innerHTML = lots.length ? lots.map(function (l) {
-                return '<tr class="table-row">'
-                    + '<td class="table-td">' + escapeHtml(l.branch || '—') + '</td>'
-                    + '<td class="table-td font-mono text-xs">' + escapeHtml(l.lot || '—') + '</td>'
-                    + '<td class="table-td">' + escapeHtml(l.expiryDate || '—') + '</td>'
-                    + '<td class="table-td text-right">' + Number(l.onHand).toLocaleString() + '</td>'
-                    + '</tr>';
-            }).join('') : '<tr><td colspan="4" class="table-td text-center text-slate-400">No breakdown available</td></tr>';
 
-            OS.openModal('viewModal');
+            if (editBtn) openEdit(row);
+
+            if (delBtn) {
+                deleteForm.action = deleteUrl(row.getAttribute('data-id'));
+                document.getElementById('deleteTargetName').textContent = row.getAttribute('data-catalog') || 'this item';
+                OS.openModal('deleteConfirmModal');
+            }
         });
 
         /* ------------------------------------------------------- zero-stock toggle */

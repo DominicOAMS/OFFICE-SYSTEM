@@ -25,6 +25,7 @@ from . import (
     fuel_approvers_repo,
     fuel_po_repo,
     fuel_prices_repo,
+    inventory_items_repo,
     program_menu_repo,
     purchase_order_approvers_repo,
     purchase_orders_repo,
@@ -1451,6 +1452,8 @@ def _txn_item_for_view(item):
         "unit": item["unit"],
         "category": item["category"],
         "quantity": item["quantity"],
+        "enteredQuantity": item["enteredQuantity"],
+        "enteredPackSize": item["enteredPackSize"],
         "lot": item["lot"],
         "expiryDate": item["expiryDate"].isoformat() if item["expiryDate"] else None,
     }
@@ -1506,7 +1509,17 @@ def _parse_transaction_items(raw_json):
     """The repeatable line-items payload from the Add form. A line is DROPPED (not
     patched) when missing a description or a positive quantity - same "drop, don't patch"
     rule _parse_items uses. No cost fields here at all - this module records physical
-    movement, not money."""
+    movement, not money.
+
+    unitMode is "pack" when the requester entered a box count instead of pieces - the
+    stored `quantity` is always the base-unit-equivalent total (what list_stock_balances()
+    sums), while `enteredQuantity`/`enteredPackSize` snapshot what was actually typed and
+    the conversion used, for display and so a later edit to the item's packSize can't
+    reinterpret old history. A "pack" entry for an item with no packSize on record is
+    dropped rather than guessed at - same silent-drop convention as everywhere else here;
+    the picker UI only ever offers pack mode when the item actually has one, so this only
+    fires if the client state and server state disagree.
+    """
     try:
         parsed = json.loads(raw_json or "[]")
     except ValueError:
@@ -1514,23 +1527,42 @@ def _parse_transaction_items(raw_json):
     if not isinstance(parsed, list):
         return []
 
+    pack_sizes = {i["id"]: i["packSize"] for i in inventory_items_repo.list_all_items()}
+
     items = []
     for entry in parsed[:MAX_TXN_ITEMS]:
         if not isinstance(entry, dict):
             continue
         description = _clip((entry.get("description") or "").strip())
-        quantity = _parse_coordinate(str(entry.get("quantity", "")))
+        raw_quantity = _parse_coordinate(str(entry.get("quantity", "")))
         item_id_raw = str(entry.get("itemId", "")).strip()
-        if not description or quantity is None or quantity <= 0:
+        item_id = int(item_id_raw) if item_id_raw.isdigit() else None
+        if not description or raw_quantity is None or raw_quantity <= 0:
             continue
+
+        unit_mode = "pack" if entry.get("unitMode") == "pack" else "base"
+        pack_size = pack_sizes.get(item_id) if item_id is not None else None
+        if unit_mode == "pack":
+            if not pack_size or pack_size <= 0:
+                continue
+            entered_quantity = int(raw_quantity)
+            entered_pack_size = int(pack_size)
+            stored_quantity = entered_quantity * entered_pack_size
+        else:
+            entered_quantity = int(raw_quantity)
+            entered_pack_size = None
+            stored_quantity = entered_quantity
+
         items.append(
             {
-                "itemId": int(item_id_raw) if item_id_raw.isdigit() else None,
+                "itemId": item_id,
                 "catalogCode": _clip((entry.get("catalogCode") or "").strip()) or None,
                 "description": description,
                 "unit": _clip((entry.get("unit") or "").strip(), limit=30) or None,
                 "category": _clip((entry.get("category") or "").strip(), limit=50) or None,
-                "quantity": int(quantity),
+                "quantity": stored_quantity,
+                "enteredQuantity": entered_quantity,
+                "enteredPackSize": entered_pack_size,
                 "lot": _clip((entry.get("lot") or "").strip(), limit=50) or None,
                 "expiryDate": (entry.get("expiryDate") or "").strip() or None,
             }
@@ -1672,21 +1704,57 @@ def warehouse_transaction_finish(txn_id):
 @main_bp.route("/page/warehouse_stocks")
 @login_required
 def warehouse_stocks():
-    """Read-only computed report - no querystring params, no pagination, matching
-    customers()/suppliers()'s "render the whole master-data table, filter client-side"
-    shape rather than the transactional Fuel PO/PO/Warehouse Transaction list pattern.
-    Stocks is a report over data, not a queue of records someone works through."""
+    """The merged Inventory page: catalog management + live on-hand quantity in one place.
+    No querystring params, no pagination, matching customers()/suppliers()'s "render the
+    whole master-data table, filter client-side" shape rather than the transactional
+    Fuel PO/PO/Warehouse Transaction list pattern - this is a report over data, not a
+    queue of records someone works through.
+    """
+    catalog_items = inventory_items_repo.list_all_items()
     lots = warehouse_transactions_repo.list_stock_balances()
 
     items_by_key = {}
+
+    # Seed every catalog item first, at 0 on-hand - fixes the gap where an item with no
+    # transaction history yet (170 of 455, at last count) would never appear at all, even
+    # with "show zero-stock" switched on, since list_stock_balances() only ever returns
+    # rows for items that have actually been through a Finished transaction.
+    for inv in catalog_items:
+        items_by_key[("id", inv["id"])] = {
+            "itemId": inv["id"],
+            "catalogCode": inv["catalog"],
+            "description": inv["description"],
+            "category": inv["category"],
+            "groupType": inv["groupType"],
+            "baseUnit": inv["baseUnit"],
+            "salesUnit": inv["salesUnit"],
+            "purchaseUnit": inv["purchaseUnit"],
+            "packSize": inv["packSize"],
+            "status": inv["status"],
+            "unit": inv["baseUnit"],
+            "onHand": 0,
+            "lots": [],
+        }
+
+    # Layer the real computed balances on top. A lot with no itemId (a manual, unlinked
+    # Stock In/Out entry) has no catalog row behind it, so it gets its own text-keyed
+    # entry rather than merging into anything - same as before this change, it just can't
+    # offer an Edit-item action since there's no catalog record for it.
     for lot in lots:
         key = ("id", lot["itemId"]) if lot["itemId"] else ("text", lot["catalogCode"], lot["description"])
         item = items_by_key.setdefault(
             key,
             {
+                "itemId": None,
                 "catalogCode": lot["catalogCode"],
                 "description": lot["description"],
                 "category": lot["category"],
+                "groupType": None,
+                "baseUnit": None,
+                "salesUnit": None,
+                "purchaseUnit": None,
+                "packSize": None,
+                "status": None,
                 "unit": lot["unit"],
                 "onHand": 0,
                 "lots": [],
@@ -1702,8 +1770,82 @@ def warehouse_stocks():
             }
         )
 
+    # "X pcs (Y boxes)" is a display convenience computed from the item's CURRENT
+    # packSize - unlike the per-transaction enteredQuantity/enteredPackSize snapshot,
+    # this is deliberately NOT historical: it just describes today's total in a more
+    # readable way, and updates immediately if the packSize is edited later.
+    for item in items_by_key.values():
+        if item["packSize"] and item["packSize"] > 0 and item["onHand"] > 0:
+            item["onHandBoxes"] = item["onHand"] // item["packSize"]
+        else:
+            item["onHandBoxes"] = None
+
     items = sorted(items_by_key.values(), key=lambda i: (i["catalogCode"] or "", i["description"] or ""))
-    return render_template("warehouse_stocks.html", items=items)
+    return render_template(
+        "warehouse_stocks.html",
+        items=items,
+        distinct_categories=sorted({i["category"] for i in catalog_items if i["category"]}),
+        distinct_group_types=sorted({i["groupType"] for i in catalog_items if i["groupType"]}),
+    )
+
+
+def _parse_inventory_item_form():
+    pack_size = request.form.get("packSize", "").strip()
+    return {
+        "catalog": _clip(request.form.get("catalog", "").strip(), limit=20) or None,
+        "description": _clip(request.form.get("description", "").strip()) or None,
+        "category": _clip(request.form.get("category", "").strip(), limit=50) or None,
+        "groupType": _clip(request.form.get("groupType", "").strip(), limit=50) or None,
+        "baseUnit": _clip(request.form.get("baseUnit", "").strip(), limit=30) or None,
+        "salesUnit": _clip(request.form.get("salesUnit", "").strip(), limit=30) or None,
+        "purchaseUnit": _clip(request.form.get("purchaseUnit", "").strip(), limit=30) or None,
+        "packSize": int(pack_size) if pack_size.isdigit() and int(pack_size) > 0 else None,
+        "status": "IN" if request.form.get("status") == "IN" else "AC",
+    }
+
+
+@main_bp.route("/page/warehouse_stocks/items/add", methods=["POST"])
+@login_required
+def warehouse_stocks_item_add():
+    data = _parse_inventory_item_form()
+    if not data["catalog"] or not data["description"]:
+        flash("Catalog code and description are required.", "error")
+        return redirect(url_for("main.warehouse_stocks"))
+
+    try:
+        inventory_items_repo.create_item(data, created_by=session.get("user_id"))
+    except IntegrityError:
+        flash(f'Catalog code "{data["catalog"]}" is already in use.', "error")
+        return redirect(url_for("main.warehouse_stocks"))
+
+    flash(f'Item "{data["catalog"]}" added.', "success")
+    return redirect(url_for("main.warehouse_stocks"))
+
+
+@main_bp.route("/page/warehouse_stocks/items/<int:item_id>/edit", methods=["POST"])
+@login_required
+def warehouse_stocks_item_edit(item_id):
+    data = _parse_inventory_item_form()
+    if not data["catalog"] or not data["description"]:
+        flash("Catalog code and description are required.", "error")
+        return redirect(url_for("main.warehouse_stocks"))
+
+    try:
+        inventory_items_repo.update_item(item_id, data, updated_by=session.get("user_id"))
+    except IntegrityError:
+        flash(f'Catalog code "{data["catalog"]}" is already in use.', "error")
+        return redirect(url_for("main.warehouse_stocks"))
+
+    flash(f'Item "{data["catalog"]}" updated.', "success")
+    return redirect(url_for("main.warehouse_stocks"))
+
+
+@main_bp.route("/page/warehouse_stocks/items/<int:item_id>/delete", methods=["POST"])
+@login_required
+def warehouse_stocks_item_delete(item_id):
+    inventory_items_repo.soft_delete_item(item_id, updated_by=session.get("user_id"))
+    flash("Item deleted.", "success")
+    return redirect(url_for("main.warehouse_stocks"))
 
 
 @main_bp.route("/page/<slug>")

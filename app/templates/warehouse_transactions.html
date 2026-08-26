@@ -378,6 +378,21 @@
                 <input type="date" class="js-item-expiry input">
             </div>
         </div>
+
+        {# Only shown when the picked catalog item has a packSize on record - a plain
+           base-unit item never gets this, since there's nothing to convert by. #}
+        <div class="js-item-pack-toggle hidden mt-3 flex flex-wrap items-center gap-4 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
+            <span class="text-xs font-medium text-slate-500 dark:text-slate-400">Quantity is in:</span>
+            <label class="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+                <input type="radio" class="checkbox js-item-unit-mode" value="base" checked>
+                <span class="js-item-base-unit-label">Pieces</span>
+            </label>
+            <label class="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+                <input type="radio" class="checkbox js-item-unit-mode" value="pack">
+                <span class="js-item-pack-unit-label">Box</span>
+            </label>
+            <span class="js-item-converted-preview text-xs text-slate-500 dark:text-slate-400"></span>
+        </div>
     </div>
 </template>
 
@@ -597,7 +612,41 @@
                 uid: 'i' + itemUidCounter,
                 itemId: null, catalogCode: '', description: '', unit: '', category: '',
                 quantity: '', lot: '', expiryDate: '',
+                // packSize/purchaseUnit/baseUnit are the picked catalog item's CURRENT
+                // values, cached client-side purely to drive the pack/pieces toggle and
+                // its live preview - the server re-resolves packSize itself from itemId
+                // when parsing the submission, this copy is never trusted as the source
+                // of truth. baseUnit is remembered separately from `unit` (the actual
+                // field value, editable by hand) so switching the toggle back to
+                // "Pieces" can restore it after "Box" mode overwrote `unit`.
+                packSize: null, purchaseUnit: '', baseUnit: '', unitMode: 'base',
             };
+        }
+
+        function updatePackPreview(row, item) {
+            var preview = row.querySelector('.js-item-converted-preview');
+            var qty = parseFloat(item.quantity);
+            if (item.unitMode === 'pack' && item.packSize && isFinite(qty) && qty > 0) {
+                preview.textContent = '= ' + (qty * item.packSize).toLocaleString() + ' ' + (item.baseUnit || 'pcs');
+            } else {
+                preview.textContent = '';
+            }
+        }
+
+        function updatePackToggle(row, item) {
+            var toggle = row.querySelector('.js-item-pack-toggle');
+            if (item.packSize && item.packSize > 0) {
+                toggle.classList.remove('hidden');
+                row.querySelector('.js-item-base-unit-label').textContent = item.baseUnit || 'Pieces';
+                row.querySelector('.js-item-pack-unit-label').textContent = item.purchaseUnit || 'Box';
+                row.querySelectorAll('.js-item-unit-mode').forEach(function (radio) {
+                    radio.checked = radio.value === item.unitMode;
+                });
+            } else {
+                toggle.classList.add('hidden');
+                item.unitMode = 'base';
+            }
+            updatePackPreview(row, item);
         }
 
         function initItemCatalogPicker(row, item) {
@@ -630,10 +679,15 @@
                 item.itemId = inv.id;
                 item.catalogCode = inv.catalog;
                 item.description = inv.description || '';
-                item.unit = inv.baseUnit || inv.purchaseUnit || inv.salesUnit || '';
+                item.baseUnit = inv.baseUnit || inv.purchaseUnit || inv.salesUnit || '';
+                item.unit = item.baseUnit;
                 item.category = inv.category || '';
+                item.packSize = inv.packSize || null;
+                item.purchaseUnit = inv.purchaseUnit || '';
+                item.unitMode = 'base';
                 input.value = label(inv);
                 row.querySelector('.js-item-unit').value = item.unit;
+                updatePackToggle(row, item);
                 panel.classList.add('hidden');
                 syncItems();
             });
@@ -643,6 +697,11 @@
                 item.catalogCode = '';
                 item.category = '';
                 item.description = input.value;
+                item.packSize = null;
+                item.purchaseUnit = '';
+                item.baseUnit = '';
+                item.unitMode = 'base';
+                updatePackToggle(row, item);
                 render(input.value);
                 panel.classList.remove('hidden');
                 syncItems();
@@ -660,6 +719,12 @@
             var frag = itemRowTemplate.content.cloneNode(true);
             var row = frag.querySelector('.js-item-row');
             row.setAttribute('data-item', item.uid);
+            // Radios need a shared `name` to be mutually exclusive, but it must be
+            // unique per row - otherwise picking "Box" on one line would uncheck
+            // "Pieces" on every other line sharing the same cloned template markup.
+            frag.querySelectorAll('.js-item-unit-mode').forEach(function (radio) {
+                radio.name = 'unitMode-' + item.uid;
+            });
             itemsList.appendChild(frag);
             initItemCatalogPicker(rowFor(item.uid), item);
             OS.refreshIcons();
@@ -678,7 +743,7 @@
                 return {
                     itemId: it.itemId, catalogCode: it.catalogCode, description: it.description,
                     unit: it.unit, category: it.category, quantity: it.quantity,
-                    lot: it.lot, expiryDate: it.expiryDate,
+                    lot: it.lot, expiryDate: it.expiryDate, unitMode: it.unitMode,
                 };
             }));
         }
@@ -723,9 +788,20 @@
                     item.description = data.description || '';
                     item.unit = data.unit || '';
                     item.category = data.category || '';
-                    item.quantity = data.quantity != null ? String(data.quantity) : '';
+                    // enteredQuantity/enteredPackSize (not the stored base-unit quantity)
+                    // are what the requester actually typed - Edit must show that, not
+                    // the converted total, or re-saving without touching this field would
+                    // silently double-convert it.
+                    item.quantity = data.enteredQuantity != null ? String(data.enteredQuantity)
+                        : (data.quantity != null ? String(data.quantity) : '');
+                    item.unitMode = data.enteredPackSize ? 'pack' : 'base';
                     item.lot = data.lot || '';
                     item.expiryDate = data.expiryDate || '';
+
+                    var inv = item.itemId ? INVENTORY_ITEMS.find(function (i) { return i.id === item.itemId; }) : null;
+                    item.packSize = inv ? inv.packSize : null;
+                    item.purchaseUnit = inv ? inv.purchaseUnit : '';
+                    item.baseUnit = inv ? (inv.baseUnit || inv.purchaseUnit || inv.salesUnit || '') : '';
                 }
                 items.push(item);
                 appendItemRow(item);
@@ -737,6 +813,7 @@
                 row.querySelector('.js-item-quantity').value = item.quantity;
                 row.querySelector('.js-item-lot').value = item.lot;
                 row.querySelector('.js-item-expiry').value = item.expiryDate;
+                updatePackToggle(row, item);
             });
             renumberItems();
             syncItems();
@@ -758,9 +835,29 @@
             if (!item) return;
 
             if (e.target.classList.contains('js-item-unit')) { item.unit = e.target.value; syncItems(); }
-            else if (e.target.classList.contains('js-item-quantity')) { item.quantity = e.target.value; syncItems(); }
+            else if (e.target.classList.contains('js-item-quantity')) {
+                item.quantity = e.target.value;
+                updatePackPreview(row, item);
+                syncItems();
+            }
             else if (e.target.classList.contains('js-item-lot')) { item.lot = e.target.value; syncItems(); }
             else if (e.target.classList.contains('js-item-expiry')) { item.expiryDate = e.target.value; syncItems(); }
+        });
+
+        itemsList.addEventListener('change', function (e) {
+            if (!e.target.classList.contains('js-item-unit-mode')) return;
+            var row = e.target.closest('.js-item-row');
+            var item = itemByUid(row.getAttribute('data-item'));
+            if (!item) return;
+            item.unitMode = e.target.value;
+            // `unit` is intentionally left untouched here - it always names the base
+            // unit the stored (converted) quantity is in, e.g. "PCS", regardless of
+            // whether pieces or a box count was entered. list_stock_balances() groups
+            // lots by (itemId, branch, lot, expiry, unit); if switching to Box mode
+            // rewrote `unit` to "BOX", the same lot would fragment into two separate
+            // on-hand groups instead of netting IN/OUT together correctly.
+            updatePackPreview(row, item);
+            syncItems();
         });
 
         document.getElementById('addItemBtn').addEventListener('click', function () { addItem(); });
@@ -863,7 +960,15 @@
             }
             wrap.innerHTML = txnItems.map(function (it, i) {
                 var meta = [];
-                if (it.quantity != null) meta.push(it.quantity + (it.unit ? ' ' + it.unit : ''));
+                if (it.enteredPackSize) {
+                    // `it.unit` is always the base unit the stored quantity is in
+                    // (see the pack-toggle change listener) - the box label shown
+                    // here comes from the catalog item's current purchaseUnit instead.
+                    var inv = it.itemId ? INVENTORY_ITEMS.find(function (i) { return i.id === it.itemId; }) : null;
+                    meta.push(it.enteredQuantity + ' ' + ((inv && inv.purchaseUnit) || 'BOX') + ' (' + it.quantity + ' ' + (it.unit || 'pcs') + ')');
+                } else if (it.quantity != null) {
+                    meta.push(it.quantity + (it.unit ? ' ' + it.unit : ''));
+                }
                 if (it.lot) meta.push('Lot ' + it.lot);
                 if (it.expiryDate) meta.push('Exp ' + formatDateDisplay(it.expiryDate));
                 return '<div class="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'

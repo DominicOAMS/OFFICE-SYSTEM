@@ -86,7 +86,7 @@ def list_active_inventory_items():
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, catalog, description, category, groupType, baseUnit, salesUnit, purchaseUnit
+                SELECT id, catalog, description, category, groupType, baseUnit, salesUnit, purchaseUnit, packSize
                 FROM tbl_inventory_items
                 WHERE isDeleted = 0 AND status = 'AC'
                 ORDER BY catalog ASC

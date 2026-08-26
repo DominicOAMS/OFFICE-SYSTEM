@@ -132,8 +132,8 @@ def create_transaction(data, created_by):
                     """
                     INSERT INTO tbl_warehouse_transaction_items
                         (transactionId, sequence, itemId, catalogCode, description, unit,
-                         category, quantity, lot, expiryDate)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         category, quantity, enteredQuantity, enteredPackSize, lot, expiryDate)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         transaction_id,
@@ -144,6 +144,8 @@ def create_transaction(data, created_by):
                         item["unit"],
                         item["category"],
                         item["quantity"],
+                        item["enteredQuantity"],
+                        item["enteredPackSize"],
                         item["lot"],
                         item["expiryDate"],
                     ),
@@ -206,8 +208,8 @@ def update_transaction(txn_id, data, updated_by):
                     """
                     INSERT INTO tbl_warehouse_transaction_items
                         (transactionId, sequence, itemId, catalogCode, description, unit,
-                         category, quantity, lot, expiryDate)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         category, quantity, enteredQuantity, enteredPackSize, lot, expiryDate)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         txn_id,
@@ -218,6 +220,8 @@ def update_transaction(txn_id, data, updated_by):
                         item["unit"],
                         item["category"],
                         item["quantity"],
+                        item["enteredQuantity"],
+                        item["enteredPackSize"],
                         item["lot"],
                         item["expiryDate"],
                     ),

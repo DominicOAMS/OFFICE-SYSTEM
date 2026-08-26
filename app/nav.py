@@ -13,7 +13,7 @@ NAV_ITEMS = [
         "label": "Warehouse",
         "icon": "warehouse",
         "children": [
-            {"label": "Stocks", "icon": "boxes", "slug": "warehouse_stocks"},
+            {"label": "Inventory", "icon": "boxes", "slug": "warehouse_stocks"},
             {"label": "Transactions", "icon": "arrow-left-right", "slug": "warehouse_transactions"},
         ],
     },
@@ -62,7 +62,6 @@ NAV_ITEMS = [
             {"label": "Customers", "icon": "contact", "slug": "parameters_customers"},
             {"label": "Suppliers", "icon": "truck", "slug": "parameters_suppliers"},
             {"label": "Users", "icon": "users", "slug": "parameters_users"},
-            {"label": "Inventory Items", "icon": "boxes", "slug": "parameters_inventory_items"},
             {"label": "Vehicles", "icon": "car", "slug": "parameters_vehicles"},
             {"label": "Fuel Approvers", "icon": "shield-check", "slug": "parameters_fuel_approvers"},
             {"label": "Fuel Prices", "icon": "gauge", "slug": "parameters_fuel_prices"},
