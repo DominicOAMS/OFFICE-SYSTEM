@@ -46,9 +46,13 @@
             </div>
         </div>
 
-        <div class="overflow-x-auto">
+        {# Bounded height (instead of plain overflow-x-auto) so BOTH scrollbars sit at
+           the edge of this box, reachable without scrolling to the bottom of a
+           455-item page first. The header is sticky within that same box so column
+           labels stay visible while scrolling through rows. #}
+        <div class="max-h-[70vh] overflow-auto">
             <table class="w-full min-w-[56rem]">
-                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                <thead class="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800/50">
                     <tr>
                         <th class="table-th">Catalog</th>
                         <th class="table-th">Description</th>
@@ -77,7 +81,7 @@
                            and corrupt the row's markup #}
                         data-lots='{{ item.lots|tojson }}'>
                         <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">{{ item.catalogCode or '—' }}</td>
-                        <td class="table-td truncate">{{ item.description or '—' }}</td>
+                        <td class="table-td max-w-xs truncate" title="{{ item.description or '' }}">{{ item.description or '—' }}</td>
                         <td class="table-td text-sm">{{ item.category or '—' }}</td>
                         <td class="table-td text-sm">{{ item.unit or '—' }}</td>
                         <td class="table-td">
