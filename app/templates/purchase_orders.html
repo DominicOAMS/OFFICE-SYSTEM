@@ -241,13 +241,15 @@
                          class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
                 </div>
 
-                <div id="supplierDetails" class="hidden grid grid-cols-1 gap-3 rounded-xl border border-slate-200
-                            bg-slate-50 p-4 sm:grid-cols-2 dark:border-slate-700 dark:bg-slate-800/50">
-                    <div><p class="help mb-0.5">Supplier ID</p><p id="supplierDetailCode" class="font-mono text-sm text-slate-900 dark:text-white">—</p></div>
-                    <div><p class="help mb-0.5">Address</p><p id="supplierDetailAddress" class="text-sm text-slate-700 dark:text-slate-300">—</p></div>
-                    <div><p class="help mb-0.5">Telephone</p><p id="supplierDetailTelephone" class="text-sm text-slate-700 dark:text-slate-300">—</p></div>
-                    <div><p class="help mb-0.5">Fax</p><p id="supplierDetailFax" class="text-sm text-slate-700 dark:text-slate-300">—</p></div>
-                    <div><p class="help mb-0.5">Email</p><p id="supplierDetailEmail" class="text-sm text-slate-700 dark:text-slate-300">—</p></div>
+                <div id="supplierDetails" class="hidden space-y-1.5 rounded-xl border border-slate-200
+                            bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
+                        <p><span class="text-slate-500 dark:text-slate-400">ID:</span> <span id="supplierDetailCode" class="font-mono text-slate-900 dark:text-white">—</span></p>
+                        <p><span class="text-slate-500 dark:text-slate-400">Tel:</span> <span id="supplierDetailTelephone" class="text-slate-700 dark:text-slate-300">—</span></p>
+                        <p><span class="text-slate-500 dark:text-slate-400">Fax:</span> <span id="supplierDetailFax" class="text-slate-700 dark:text-slate-300">—</span></p>
+                        <p><span class="text-slate-500 dark:text-slate-400">Email:</span> <span id="supplierDetailEmail" class="text-slate-700 dark:text-slate-300">—</span></p>
+                    </div>
+                    <p class="text-sm"><span class="text-slate-500 dark:text-slate-400">Address:</span> <span id="supplierDetailAddress" class="text-slate-700 dark:text-slate-300">—</span></p>
                 </div>
 
                 <div class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
@@ -256,8 +258,8 @@
                     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
                             <label class="label" for="fieldBranch">Branch</label>
-                            <input type="text" class="input" id="fieldBranch" name="branch" placeholder="e.g. Calamba">
-                            <p class="help">Delivery address/telephone/mobile below default from your registered branch.</p>
+                            <select class="input" id="fieldBranch"></select>
+                            <input type="hidden" id="fieldBranchValue" name="branch">
                         </div>
                         <div>
                             <label class="label" for="fieldPriceCode">Price Code</label>
@@ -267,20 +269,17 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                        <div>
-                            <label class="label" for="fieldDeliveryAddress">Delivery Address</label>
-                            <input type="text" class="input" id="fieldDeliveryAddress" name="deliveryAddress">
+                    <div class="space-y-1 rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
+                        <p><span class="text-slate-500 dark:text-slate-400">Address:</span> <span id="deliveryAddressDisplay" class="text-slate-700 dark:text-slate-300">—</span></p>
+                        <div class="grid grid-cols-2 gap-x-4">
+                            <p><span class="text-slate-500 dark:text-slate-400">Telephone:</span> <span id="deliveryTelephoneDisplay" class="text-slate-700 dark:text-slate-300">—</span></p>
+                            <p><span class="text-slate-500 dark:text-slate-400">Mobile:</span> <span id="deliveryMobileDisplay" class="text-slate-700 dark:text-slate-300">—</span></p>
                         </div>
-                        <div>
-                            <label class="label" for="fieldDeliveryTelephone">Telephone Number</label>
-                            <input type="text" class="input" id="fieldDeliveryTelephone" name="deliveryTelephone">
-                        </div>
-                        <div>
-                            <label class="label" for="fieldDeliveryMobileNumber">Mobile Number</label>
-                            <input type="text" class="input" id="fieldDeliveryMobileNumber" name="deliveryMobileNumber">
-                        </div>
+                        <p class="help">Fixed default for your branch.</p>
                     </div>
+                    <input type="hidden" id="fieldDeliveryAddress" name="deliveryAddress">
+                    <input type="hidden" id="fieldDeliveryTelephone" name="deliveryTelephone">
+                    <input type="hidden" id="fieldDeliveryMobileNumber" name="deliveryMobileNumber">
 
                     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
@@ -719,22 +718,64 @@
             fieldPriceCode.dispatchEvent(new Event('change'));
         });
 
-        /* ------------------------------------------------- branch delivery defaults
-           Requirement 2: keyed off the Branch field, which itself defaults to the
-           logged-in user's own registered branch when the modal opens. */
+        /* ------------------------------------------------- branch (requirement 3)
+           USER_BRANCH is comma-separated when someone is assigned more than one
+           branch (real data: e.g. "Calamba,Bicol"). One branch -> locked to it;
+           several -> a combobox over just that user's own assigned branches. A
+           disabled <select> doesn't submit, so fieldBranchValue (hidden) always
+           carries the real value posted as `branch`. */
 
         var fieldBranch = document.getElementById('fieldBranch');
+        var fieldBranchValue = document.getElementById('fieldBranchValue');
+        var userBranches = (USER_BRANCH || '').split(',').map(function (b) { return b.trim(); }).filter(Boolean);
+
+        function setupBranchField() {
+            fieldBranch.innerHTML = '';
+            if (!userBranches.length) {
+                var opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'Select branch';
+                fieldBranch.appendChild(opt);
+                fieldBranch.disabled = false;
+                fieldBranchValue.value = '';
+                return;
+            }
+            userBranches.forEach(function (b) {
+                var o = document.createElement('option');
+                o.value = b;
+                o.textContent = b;
+                fieldBranch.appendChild(o);
+            });
+            fieldBranch.value = userBranches[0];
+            fieldBranchValue.value = userBranches[0];
+            fieldBranch.disabled = userBranches.length === 1;
+            fieldBranch.classList.toggle('bg-slate-100', fieldBranch.disabled);
+            fieldBranch.classList.toggle('dark:bg-slate-800', fieldBranch.disabled);
+            fieldBranch.classList.toggle('opacity-70', fieldBranch.disabled);
+            fieldBranch.classList.toggle('cursor-not-allowed', fieldBranch.disabled);
+        }
+
+        fieldBranch.addEventListener('change', function () {
+            fieldBranchValue.value = fieldBranch.value;
+            applyBranchDeliveryDefaults();
+        });
+
+        /* ------------------------------------------------- branch delivery defaults
+           Requirement 2/4: keyed off the Branch field, and shown as a read-only
+           card (like Supplier Details) rather than editable fields - these are a
+           fixed lookup per branch, not something to type per PO (confirmed against
+           legacy: it only ever hardcoded the Calamba values into the create form
+           regardless of branch; only the printed document varies by branch). */
 
         function applyBranchDeliveryDefaults() {
-            var defaults = BRANCH_DELIVERY_DEFAULTS[fieldBranch.value.trim()];
-            if (!defaults) return;
+            var defaults = BRANCH_DELIVERY_DEFAULTS[fieldBranch.value.trim()] || { address: '', telephone: '', mobile: '' };
             document.getElementById('fieldDeliveryAddress').value = defaults.address;
             document.getElementById('fieldDeliveryTelephone').value = defaults.telephone;
             document.getElementById('fieldDeliveryMobileNumber').value = defaults.mobile;
+            document.getElementById('deliveryAddressDisplay').textContent = defaults.address || '—';
+            document.getElementById('deliveryTelephoneDisplay').textContent = defaults.telephone || '—';
+            document.getElementById('deliveryMobileDisplay').textContent = defaults.mobile || '—';
         }
-
-        fieldBranch.addEventListener('input', applyBranchDeliveryDefaults);
-        fieldBranch.addEventListener('change', applyBranchDeliveryDefaults);
 
         /* ------------------------------------------------- payment due date (requirement 2)
            Expected Delivery Date + the chosen Payment Term's day count. */
@@ -1081,7 +1122,7 @@
             // see the fieldSupplierId listener and refreshSupplierProducts() above.
             supplierPicker.reset();
             approverPicker.reset();
-            fieldBranch.value = USER_BRANCH;
+            setupBranchField();
             applyBranchDeliveryDefaults();
             document.getElementById('fieldPoDate').value = todayIso();
             OS.openModal('recordModal');
