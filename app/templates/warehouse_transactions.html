@@ -6,7 +6,8 @@
 {% set STATUS_TONE = {
     'Created': 'badge-slate',
     'Verified': 'badge-warning',
-    'Finished': 'badge-success'
+    'Finished': 'badge-success',
+    'Void': 'badge-accent'
 } %}
 {% set DIRECTION_TONE = {
     'IN': 'badge-success',
@@ -62,7 +63,7 @@
             </a>
             {% endfor %}
             <span class="mx-1 h-4 w-px bg-slate-200 dark:bg-slate-700"></span>
-            {% for value, label in [('', 'All Statuses'), ('Created', 'Created'), ('Verified', 'Verified'), ('Finished', 'Finished')] %}
+            {% for value, label in [('', 'All Statuses'), ('Created', 'Created'), ('Verified', 'Verified'), ('Finished', 'Finished'), ('Void', 'Void')] %}
             <a href="{{ url_for('main.warehouse_transactions', q=search or None, direction=direction or None, status=value or None) }}"
                class="badge {{ 'bg-accent-600 text-white ring-0' if status == value else 'badge-slate' }}">
                 {{ label }}
@@ -104,6 +105,8 @@
                         data-created-by-name="{{ t.createdByName or '' }}"
                         data-verified-by-name="{{ t.verifiedByName or '' }}"
                         data-finished-by-name="{{ t.finishedByName or '' }}"
+                        data-voided-by-name="{{ t.voidedByName or '' }}"
+                        data-void-reason="{{ t.voidReason or '' }}"
                         {# single-quoted: Flask's tojson escapes < > & ' but NOT ", and JSON
                            is full of " - double quotes here would end the attribute early
                            and corrupt the row's markup #}
@@ -142,14 +145,16 @@
                                     <i data-lucide="check-check" class="h-4 w-4"></i>
                                 </button>
                                 {% endif %}
-                                {% if t.status == 'Created' and session.get('user_id') == t.createdBy %}
+                                {% if t.status in ('Created', 'Verified') and session.get('user_id') == t.createdBy %}
                                 <button type="button" class="btn btn-icon btn-ghost js-edit"
                                         title="Edit" aria-label="Edit Transaction">
                                     <i data-lucide="pencil" class="h-4 w-4"></i>
                                 </button>
-                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-delete"
-                                        title="Delete" aria-label="Delete Transaction">
-                                    <i data-lucide="trash-2" class="h-4 w-4"></i>
+                                {% endif %}
+                                {% if t.status != 'Void' and session.get('user_id') == t.createdBy %}
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-void"
+                                        title="Void" aria-label="Void Transaction">
+                                    <i data-lucide="ban" class="h-4 w-4"></i>
                                 </button>
                                 {% endif %}
                             </div>
@@ -396,6 +401,10 @@
                 <div><p class="help mb-0.5">Created By</p><p id="viewCreatedBy" class="text-slate-700 dark:text-slate-300"></p></div>
                 <div><p class="help mb-0.5">Verified By</p><p id="viewVerifiedBy" class="text-slate-700 dark:text-slate-300"></p></div>
                 <div><p class="help mb-0.5">Finished By</p><p id="viewFinishedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Voided By</p><p id="viewVoidedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div id="viewVoidReasonWrap" class="hidden rounded-lg bg-rose-50 px-3 py-2 dark:bg-rose-500/10">
+                <p class="help mb-0.5">Void Reason</p><p id="viewVoidReason" class="text-slate-700 dark:text-slate-300"></p>
             </div>
             <div>
                 <p class="help mb-1">Line Items</p>
@@ -409,31 +418,35 @@
     </div>
 </div>
 
-<!-- ===================== Delete confirm modal ===================== -->
-<div id="deleteConfirmModal" data-modal class="modal-backdrop hidden">
+<!-- ===================== Void confirm modal ===================== -->
+<div id="voidConfirmModal" data-modal class="modal-backdrop hidden">
     <div class="modal-panel max-w-md">
-        <form id="deleteForm" method="POST" action="">
+        <form id="voidForm" method="POST" action="">
             <div class="modal-header">
-                <h3 class="modal-title">Delete Transaction</h3>
+                <h3 class="modal-title">Void Transaction</h3>
                 <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
                     <i data-lucide="x" class="h-4 w-4"></i>
                 </button>
             </div>
             <div class="px-5 py-5">
-                <div class="flex items-start gap-3">
+                <div class="mb-4 flex items-start gap-3">
                     <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
                         <i data-lucide="triangle-alert" class="h-5 w-5"></i>
                     </span>
                     <div>
-                        <p class="text-sm font-medium text-slate-900 dark:text-white">Delete this transaction?</p>
-                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">This cannot be undone from here.</p>
+                        <p class="text-sm font-medium text-slate-900 dark:text-white">Void this transaction?</p>
+                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                            It stays in the records marked Void rather than being removed - this cannot be undone from here.
+                        </p>
                     </div>
                 </div>
+                <label class="label" for="voidReason">Reason (optional)</label>
+                <textarea class="input" id="voidReason" name="reason" rows="2"></textarea>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
                 <button type="submit" class="btn btn-danger">
-                    <i data-lucide="trash-2" class="h-4 w-4"></i>Delete
+                    <i data-lucide="ban" class="h-4 w-4"></i>Void
                 </button>
             </div>
         </form>
@@ -879,6 +892,11 @@
             document.getElementById('viewCreatedBy').textContent = row.getAttribute('data-created-by-name') || '—';
             document.getElementById('viewVerifiedBy').textContent = row.getAttribute('data-verified-by-name') || '—';
             document.getElementById('viewFinishedBy').textContent = row.getAttribute('data-finished-by-name') || '—';
+            document.getElementById('viewVoidedBy').textContent = row.getAttribute('data-voided-by-name') || '—';
+
+            var voidReason = row.getAttribute('data-void-reason');
+            document.getElementById('viewVoidReasonWrap').classList.toggle('hidden', !voidReason);
+            document.getElementById('viewVoidReason').textContent = voidReason || '';
 
             renderViewItems(row);
 
@@ -889,14 +907,14 @@
             OS.openModal('viewModal');
         }
 
-        var deleteForm = document.getElementById('deleteForm');
+        var voidForm = document.getElementById('voidForm');
 
         tbody.addEventListener('click', function (e) {
             var viewBtn = e.target.closest('.js-view');
             var editBtn = e.target.closest('.js-edit');
             var verifyBtn = e.target.closest('.js-verify');
             var finishBtn = e.target.closest('.js-finish');
-            var delBtn = e.target.closest('.js-delete');
+            var voidBtn = e.target.closest('.js-void');
 
             if (viewBtn) openView(viewBtn.closest('tr'));
             if (editBtn) openEdit(editBtn.closest('tr'));
@@ -910,9 +928,10 @@
                 f2.method = 'POST'; f2.action = finishBtn.getAttribute('data-url');
                 document.body.appendChild(f2); f2.submit();
             }
-            if (delBtn) {
-                deleteForm.action = '/page/warehouse_transactions/' + delBtn.closest('tr').getAttribute('data-id') + '/delete';
-                OS.openModal('deleteConfirmModal');
+            if (voidBtn) {
+                document.getElementById('voidReason').value = '';
+                voidForm.action = '/page/warehouse_transactions/' + voidBtn.closest('tr').getAttribute('data-id') + '/void';
+                OS.openModal('voidConfirmModal');
             }
         });
 

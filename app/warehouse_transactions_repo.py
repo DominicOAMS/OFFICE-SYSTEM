@@ -4,7 +4,8 @@ _TXN_COLUMNS = """
     t.*,
     creator.name AS createdByName,
     verifier.name AS verifiedByName,
-    finisher.name AS finishedByName
+    finisher.name AS finishedByName,
+    voider.name AS voidedByName
 """
 
 _TXN_FROM = """
@@ -12,6 +13,7 @@ _TXN_FROM = """
     LEFT JOIN tbl_users creator ON creator.id = t.createdBy
     LEFT JOIN tbl_users verifier ON verifier.id = t.verifiedBy
     LEFT JOIN tbl_users finisher ON finisher.id = t.finishedBy
+    LEFT JOIN tbl_users voider ON voider.id = t.voidedBy
 """
 
 
@@ -288,13 +290,27 @@ def get_items_for_transaction(txn_id):
     return list_items_for_transactions([txn_id]).get(int(txn_id), [])
 
 
-def soft_delete_transaction(txn_id, updated_by):
+def void(txn_id, voided_by, reason):
+    """Mark a transaction Void - the only way to cancel one. There is deliberately no
+    delete for this module: a stock movement record needs to stay in the ledger for audit
+    purposes even when it turns out to be wrong, the same way a paper transaction gets
+    voided rather than torn up. Works at any prior status, including 'Finished' - that's
+    the actual point of Void existing separately from the Created-only Edit gate: it's the
+    one way to correct an already-Finished transaction, and because list_stock_balances()
+    only counts status='Finished' rows, voiding one automatically removes it from computed
+    on-hand quantities without any other code needing to change.
+    """
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE tbl_warehouse_transactions SET isDeleted = 1, updatedBy = %s, updatedAt = NOW() WHERE id = %s",
-                (updated_by, txn_id),
+                """
+                UPDATE tbl_warehouse_transactions
+                SET status = 'Void', voidedBy = %s, voidedAt = NOW(), voidReason = %s,
+                    updatedBy = %s, updatedAt = NOW()
+                WHERE id = %s
+                """,
+                (voided_by, reason, voided_by, txn_id),
             )
     finally:
         conn.close()

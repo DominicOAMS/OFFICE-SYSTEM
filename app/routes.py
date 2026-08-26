@@ -1603,10 +1603,11 @@ def warehouse_transaction_edit(txn_id):
     txn = warehouse_transactions_repo.get_transaction(txn_id)
     if not txn:
         abort(404)
-    # Same gate as delete: only the creator, and only while still Created - Verifying/
-    # Finishing represents a physical event that already happened, so rewriting it
-    # afterward would misrepresent history.
-    if txn["createdBy"] != session.get("user_id") or txn["status"] != "Created":
+    # Only the creator, and only before it's Finished - Created and Verified are both
+    # still "not yet confirmed as done" and stay editable, but once Finished the record
+    # represents a physical event that already happened, so rewriting it would
+    # misrepresent history. (Void is also blocked here since it's already terminal.)
+    if txn["createdBy"] != session.get("user_id") or txn["status"] in ("Finished", "Void"):
         abort(403)
 
     data = _parse_warehouse_transaction_form()
@@ -1624,16 +1625,20 @@ def warehouse_transaction_edit(txn_id):
     return redirect(url_for("main.warehouse_transactions"))
 
 
-@main_bp.route("/page/warehouse_transactions/<int:txn_id>/delete", methods=["POST"])
+@main_bp.route("/page/warehouse_transactions/<int:txn_id>/void", methods=["POST"])
 @login_required
-def warehouse_transaction_delete(txn_id):
+def warehouse_transaction_void(txn_id):
     txn = warehouse_transactions_repo.get_transaction(txn_id)
     if not txn:
         abort(404)
-    if txn["createdBy"] != session.get("user_id") or txn["status"] != "Created":
+    # No status restriction beyond "not already Void" - unlike Edit, Void is deliberately
+    # allowed at any stage including Finished, since it's the only way to correct an
+    # already-Finished transaction (see warehouse_transactions_repo.void's docstring).
+    if txn["createdBy"] != session.get("user_id") or txn["status"] == "Void":
         abort(403)
-    warehouse_transactions_repo.soft_delete_transaction(txn_id, updated_by=session.get("user_id"))
-    flash("Transaction deleted.", "success")
+    reason = request.form.get("reason", "").strip()[:255] or None
+    warehouse_transactions_repo.void(txn_id, voided_by=session.get("user_id"), reason=reason)
+    flash("Transaction voided.", "success")
     return redirect(url_for("main.warehouse_transactions"))
 
 
