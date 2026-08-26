@@ -420,10 +420,32 @@
             </div>
         </div>
 
-        <div class="mt-3">
-            <label class="label">Allocation (program / grant / consignment, optional)</label>
-            <input type="text" class="js-item-allocation input">
+        <div class="mt-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+            <div class="mb-2 flex items-center justify-between gap-2">
+                <label class="label mb-0">Allocate to customers (optional)</label>
+                <span class="js-item-allocated-summary shrink-0 text-xs text-slate-500 dark:text-slate-400">0 / 0 allocated</span>
+            </div>
+            <div class="js-item-allocations space-y-2"></div>
+            <button type="button" class="js-add-allocation btn btn-secondary btn-sm mt-2" data-action="add-allocation">
+                <i data-lucide="plus" class="h-3.5 w-3.5"></i>Add allocation
+            </button>
+            <p class="help mt-1">Split this line's quantity across the customer(s) it's being ordered for, so the PO can be traced back to them later.</p>
         </div>
+    </div>
+</template>
+
+<template id="allocationRowTemplate">
+    <div class="js-allocation-row flex items-center gap-2" data-alloc="">
+        <div class="relative flex-1" data-dropdown>
+            <input type="text" class="js-alloc-customer-search input" autocomplete="off" placeholder="Search customer by ID or name…">
+            <div class="js-alloc-customer-panel hidden absolute z-[1200] mt-1 max-h-48 w-full overflow-y-auto rounded-lg
+                        border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+        </div>
+        <input type="number" class="js-alloc-quantity input w-28" min="0.01" step="0.01" placeholder="Qty">
+        <button type="button" class="js-remove-allocation btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                data-action="remove-allocation" aria-label="Remove allocation">
+            <i data-lucide="trash-2" class="h-4 w-4"></i>
+        </button>
     </div>
 </template>
 
@@ -541,6 +563,7 @@
     (function () {
         var SUPPLIERS = {{ suppliers|tojson }};
         var APPROVERS = {{ approvers|tojson }};
+        var CUSTOMERS = {{ customers|tojson }};
         var SUPPLIER_PRICE_CODES = {{ supplier_price_codes|tojson }};
         var USER_BRANCH = {{ (session.get('user_branch') or '')|tojson }};
 
@@ -829,6 +852,7 @@
 
         var itemsList = document.getElementById('itemsList');
         var itemRowTemplate = document.getElementById('itemRowTemplate');
+        var allocationRowTemplate = document.getElementById('allocationRowTemplate');
         var fieldItemsJson = document.getElementById('fieldItemsJson');
         var vatableDisplay = document.getElementById('vatableDisplay');
         var vatDisplay = document.getElementById('vatDisplay');
@@ -859,8 +883,121 @@
                 unit: '',
                 quantity: '',
                 unitCost: '',
-                allocation: '',
+                allocations: [],
             };
+        }
+
+        /* ------------------------------------------------- customer allocations
+           Recommendation from the standard-PO-flow research: a line's quantity
+           can be split across the customer(s) it's being ordered for (the ERP
+           "order allocation" pattern), so a PO can be traced back to who it
+           served - matching what legacy tracked as unstructured free text
+           (see migrate_legacy_allocations.py). Optional; sum <= line quantity,
+           enforced here and again server-side. */
+
+        var allocUidCounter = 0;
+
+        function makeAllocation() {
+            allocUidCounter += 1;
+            return { uid: 'a' + allocUidCounter, customerId: null, customerName: '', quantity: '' };
+        }
+
+        function allocationsList(itemRow) {
+            return itemRow.querySelector('.js-item-allocations');
+        }
+
+        function updateAllocationSummary(item) {
+            var itemRow = rowFor(item.uid);
+            if (!itemRow) return;
+            var allocated = item.allocations.reduce(function (sum, a) {
+                var q = parseFloat(a.quantity);
+                return sum + (isFinite(q) && q > 0 ? q : 0);
+            }, 0);
+            var ordered = parseFloat(item.quantity);
+            ordered = isFinite(ordered) ? ordered : 0;
+            var summary = itemRow.querySelector('.js-item-allocated-summary');
+            summary.textContent = allocated + ' / ' + ordered + ' allocated';
+            summary.classList.toggle('text-rose-500', allocated > ordered);
+            summary.classList.toggle('dark:text-rose-400', allocated > ordered);
+            summary.classList.toggle('text-slate-500', allocated <= ordered);
+            summary.classList.toggle('dark:text-slate-400', allocated <= ordered);
+        }
+
+        function initAllocationCustomerPicker(row, alloc, item) {
+            var input = row.querySelector('.js-alloc-customer-search');
+            var panel = row.querySelector('.js-alloc-customer-panel');
+            searchablePanels.push(panel);
+
+            function label(c) { return (c.code || '') + ' — ' + c.name; }
+
+            function render(filterText) {
+                var term = (filterText || '').trim().toLowerCase();
+                var matches = CUSTOMERS.filter(function (c) {
+                    return !term || label(c).toLowerCase().indexOf(term) !== -1;
+                });
+                panel.innerHTML = matches.length
+                    ? matches.map(function (c, idx) {
+                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-idx="' + idx + '">'
+                            + escapeHtml(label(c)) + '</button>';
+                    }).join('')
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matches</p>';
+                panel._matches = matches;
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-idx]');
+                if (!btn || !panel._matches) return;
+                var c = panel._matches[parseInt(btn.getAttribute('data-idx'), 10)];
+                if (!c) return;
+                alloc.customerId = c.id;
+                alloc.customerName = c.name;
+                input.value = label(c);
+                panel.classList.add('hidden');
+                syncItems();
+            });
+
+            input.addEventListener('input', function () {
+                alloc.customerId = null;
+                alloc.customerName = '';
+                render(input.value);
+                panel.classList.remove('hidden');
+                syncItems();
+            });
+
+            input.addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeAllOtherDropdowns(panel);
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+        }
+
+        function appendAllocationRow(item, alloc) {
+            var itemRow = rowFor(item.uid);
+            var frag = allocationRowTemplate.content.cloneNode(true);
+            var row = frag.querySelector('.js-allocation-row');
+            row.setAttribute('data-alloc', alloc.uid);
+            allocationsList(itemRow).appendChild(frag);
+            var liveRow = allocationsList(itemRow).querySelector('.js-allocation-row[data-alloc="' + alloc.uid + '"]');
+            initAllocationCustomerPicker(liveRow, alloc, item);
+            OS.refreshIcons();
+        }
+
+        function addAllocation(item) {
+            var alloc = makeAllocation();
+            item.allocations.push(alloc);
+            appendAllocationRow(item, alloc);
+            updateAllocationSummary(item);
+            syncItems();
+        }
+
+        function removeAllocation(item, allocUid) {
+            var itemRow = rowFor(item.uid);
+            var row = allocationsList(itemRow).querySelector('.js-allocation-row[data-alloc="' + allocUid + '"]');
+            if (row) row.remove();
+            item.allocations = item.allocations.filter(function (a) { return a.uid !== allocUid; });
+            updateAllocationSummary(item);
+            syncItems();
         }
 
         /* ------------------------------------------------- per-row catalog picker
@@ -943,6 +1080,7 @@
             itemsList.appendChild(frag);
             var liveRow = rowFor(item.uid);
             initItemCatalogPicker(liveRow, item);
+            updateAllocationSummary(item);
             OS.refreshIcons();
         }
 
@@ -965,7 +1103,9 @@
                     unit: it.unit,
                     quantity: it.quantity,
                     unitCost: it.unitCost,
-                    allocation: it.allocation,
+                    allocations: it.allocations.map(function (a) {
+                        return { customerId: a.customerId, quantity: a.quantity };
+                    }),
                 };
             }));
 
@@ -1061,8 +1201,15 @@
             if (!btn) return;
             var row = btn.closest('.js-item-row');
             if (!row) return;
-            var uid = row.getAttribute('data-item');
-            if (btn.getAttribute('data-action') === 'remove-item') removeItem(uid);
+            var item = itemByUid(row.getAttribute('data-item'));
+            var action = btn.getAttribute('data-action');
+
+            if (action === 'remove-item') removeItem(row.getAttribute('data-item'));
+            if (action === 'add-allocation' && item) addAllocation(item);
+            if (action === 'remove-allocation' && item) {
+                var allocRow = btn.closest('.js-allocation-row');
+                if (allocRow) removeAllocation(item, allocRow.getAttribute('data-alloc'));
+            }
         });
 
         itemsList.addEventListener('input', function (e) {
@@ -1076,13 +1223,19 @@
                 syncItems();
             } else if (e.target.classList.contains('js-item-quantity')) {
                 item.quantity = e.target.value;
+                updateAllocationSummary(item);
                 syncItems();
             } else if (e.target.classList.contains('js-item-unit-cost')) {
                 item.unitCost = e.target.value;
                 syncItems();
-            } else if (e.target.classList.contains('js-item-allocation')) {
-                item.allocation = e.target.value;
-                syncItems();
+            } else if (e.target.classList.contains('js-alloc-quantity')) {
+                var allocRow = e.target.closest('.js-allocation-row');
+                var alloc = allocRow && item.allocations.find(function (a) { return a.uid === allocRow.getAttribute('data-alloc'); });
+                if (alloc) {
+                    alloc.quantity = e.target.value;
+                    updateAllocationSummary(item);
+                    syncItems();
+                }
             }
         });
 
@@ -1109,6 +1262,20 @@
                 }
                 if (!(parseFloat(it.unitCost) >= 0)) {
                     e.preventDefault(); alert('Line item ' + n + ' needs a unit cost.'); return;
+                }
+                var allocated = it.allocations.reduce(function (sum, a) {
+                    var q = parseFloat(a.quantity);
+                    return sum + (isFinite(q) && q > 0 ? q : 0);
+                }, 0);
+                if (allocated > parseFloat(it.quantity) + 0.001) {
+                    e.preventDefault();
+                    alert('Line item ' + n + ': allocated quantity (' + allocated + ') exceeds the ordered quantity (' + it.quantity + ').');
+                    return;
+                }
+                if (it.allocations.some(function (a) { return !a.customerId || !(parseFloat(a.quantity) > 0); })) {
+                    e.preventDefault();
+                    alert('Line item ' + n + ' has an allocation missing a customer or quantity — pick one or remove that row.');
+                    return;
                 }
             }
         });
@@ -1156,13 +1323,19 @@
                 if (it.quantity != null) meta.push(it.quantity + (it.unit ? ' ' + it.unit : ''));
                 if (it.unitCost != null) meta.push('@ ' + peso(it.unitCost));
                 if (it.amount != null) meta.push(peso(it.amount));
+                var allocations = it.allocations || [];
+                var allocatedText = allocations.length
+                    ? 'Allocated: ' + allocations.map(function (a) {
+                        return escapeHtml(a.customerName || a.customerCode || 'customer') + ' (' + a.quantity + ')';
+                    }).join(', ')
+                    : '';
                 return '<div class="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
                     + '<div class="mb-0.5 flex items-center justify-between gap-2">'
                     + '<span class="text-xs font-semibold text-slate-900 dark:text-white">' + (i + 1) + '. '
                     + escapeHtml(it.description || it.catalogCode || '—') + '</span>'
                     + '<span class="shrink-0 text-xs text-slate-500 dark:text-slate-400">' + meta.join(' · ') + '</span>'
                     + '</div>'
-                    + (it.allocation ? '<p class="text-[11px] text-slate-400">' + escapeHtml(it.allocation) + '</p>' : '')
+                    + (allocatedText ? '<p class="text-[11px] text-slate-400">' + allocatedText + '</p>' : '')
                     + '</div>';
             }).join('');
         }

@@ -1173,7 +1173,7 @@ PURCHASE_ORDER_PER_PAGE = 30
 MAX_ITEMS_PER_PO = 50
 
 
-def _item_for_view(item):
+def _item_for_view(item, allocations):
     """Display-ready primitives for the View modal's line-item breakdown - same reasoning
     as _trip_for_view: Decimal doesn't serialize the way a human wants via |tojson."""
     return {
@@ -1183,7 +1183,14 @@ def _item_for_view(item):
         "quantity": float(item["quantity"]) if item["quantity"] is not None else None,
         "unitCost": float(item["unitCost"]) if item["unitCost"] is not None else None,
         "amount": float(item["amount"]) if item["amount"] is not None else None,
-        "allocation": item["allocation"],
+        "allocations": [
+            {
+                "customerCode": a["customerCode"],
+                "customerName": a["customerName"],
+                "quantity": float(a["quantity"]) if a["quantity"] is not None else None,
+            }
+            for a in allocations
+        ],
     }
 
 
@@ -1208,11 +1215,12 @@ def purchase_orders():
         limit=PURCHASE_ORDER_PER_PAGE,
         offset=(page - 1) * PURCHASE_ORDER_PER_PAGE,
     )
+    items_by_po_id = purchase_orders_repo.list_items_for_purchase_orders([r["id"] for r in records])
+    all_item_ids = [i["id"] for items in items_by_po_id.values() for i in items]
+    allocations_by_item = purchase_orders_repo.list_allocations_for_items(all_item_ids)
     items_by_po = {
-        po_id: [_item_for_view(i) for i in items]
-        for po_id, items in purchase_orders_repo.list_items_for_purchase_orders(
-            [r["id"] for r in records]
-        ).items()
+        po_id: [_item_for_view(i, allocations_by_item.get(i["id"], [])) for i in items]
+        for po_id, items in items_by_po_id.items()
     }
     return render_template(
         "purchase_orders.html",
@@ -1220,6 +1228,7 @@ def purchase_orders():
         items_by_po=items_by_po,
         suppliers=suppliers_repo.list_active_suppliers(),
         supplier_price_codes=suppliers_repo.list_price_codes_by_supplier(),
+        customers=customers_repo.list_active_customers(),
         approvers=purchase_order_approvers_repo.list_approvers(),
         search=search,
         status=status,
@@ -1258,6 +1267,35 @@ def purchase_order_supplier_products():
     )
 
 
+def _parse_allocations(raw_allocations, item_quantity, line_label):
+    """A line item's customer-allocation breakdown (e.g. 20 boxes to Customer
+    A, 20 to B, 10 to C) - the recommended ERP pattern for tracing a PO back
+    to the customer(s) it served, matching what legacy tracked as unstructured
+    free text (see migrate_legacy_allocations.py).
+
+    A malformed entry (missing customerId or non-positive quantity) is
+    dropped like other malformed input. Over-allocating the line (sum >
+    quantity) is a hard error rather than silently dropped/clipped - the
+    requester should see and fix it, not have their split quietly rewritten.
+    """
+    if not isinstance(raw_allocations, list):
+        return [], None
+    allocations = []
+    for entry in raw_allocations:
+        if not isinstance(entry, dict):
+            continue
+        customer_id_raw = str(entry.get("customerId", "")).strip()
+        quantity = _parse_coordinate(str(entry.get("quantity", "")))
+        if not customer_id_raw.isdigit() or quantity is None or quantity <= 0:
+            continue
+        allocations.append({"customerId": int(customer_id_raw), "quantity": Decimal(str(quantity))})
+
+    total = sum((a["quantity"] for a in allocations), Decimal("0"))
+    if total > item_quantity:
+        return allocations, f'{line_label}: allocated quantity ({total}) exceeds the ordered quantity ({item_quantity}).'
+    return allocations, None
+
+
 def _parse_items(raw_json, valid_catalogs=None):
     """The repeatable line-items payload from the Add form.
 
@@ -1271,16 +1309,20 @@ def _parse_items(raw_json, valid_catalogs=None):
     priced under the chosen price code (requirement 4) - a line whose catalog isn't in
     that set is dropped the same way, so the client's scoped picker can't be bypassed by
     posting an arbitrary catalog string directly.
+
+    Returns (items, allocation_errors) - the latter is a list of human-readable
+    messages for any line whose allocations over-committed its quantity.
     """
     try:
         parsed = json.loads(raw_json or "[]")
     except ValueError:
-        return []
+        return [], []
     if not isinstance(parsed, list):
-        return []
+        return [], []
 
     items = []
-    for entry in parsed[:MAX_ITEMS_PER_PO]:
+    allocation_errors = []
+    for idx, entry in enumerate(parsed[:MAX_ITEMS_PER_PO], start=1):
         if not isinstance(entry, dict):
             continue
         description = _clip((entry.get("description") or "").strip())
@@ -1291,19 +1333,25 @@ def _parse_items(raw_json, valid_catalogs=None):
             continue
         if valid_catalogs is not None and catalog_code not in valid_catalogs:
             continue
+
+        quantity = Decimal(str(quantity))
+        allocations, alloc_error = _parse_allocations(entry.get("allocations"), quantity, f"Line item {idx}")
+        if alloc_error:
+            allocation_errors.append(alloc_error)
+
         items.append(
             {
                 "itemId": None,
                 "catalogCode": catalog_code,
                 "description": description,
                 "unit": _clip((entry.get("unit") or "").strip(), limit=30) or None,
-                "quantity": Decimal(str(quantity)),
+                "quantity": quantity,
                 "unitCost": Decimal(str(unit_cost)),
-                "amount": (Decimal(str(quantity)) * Decimal(str(unit_cost))).quantize(Decimal("0.01")),
-                "allocation": (entry.get("allocation") or "").strip() or None,
+                "amount": (quantity * Decimal(str(unit_cost))).quantize(Decimal("0.01")),
+                "allocations": allocations,
             }
         )
-    return items
+    return items, allocation_errors
 
 
 def _parse_purchase_order_form():
@@ -1323,7 +1371,7 @@ def _parse_purchase_order_form():
             if p["catalog"]
         }
 
-    items = _parse_items(request.form.get("itemsJson"), valid_catalogs)
+    items, allocation_errors = _parse_items(request.form.get("itemsJson"), valid_catalogs)
 
     # Money is always derived from items, never trusted from the client - the legacy
     # migration found stored totals that had drifted from their own line items, which is
@@ -1361,6 +1409,7 @@ def _parse_purchase_order_form():
         "branch": _clip(request.form.get("branch", "").strip(), limit=100) or None,
         "approverUserId": int(approver_user_id) if approver_user_id.isdigit() else None,
         "items": items,
+        "allocationErrors": allocation_errors,
     }
 
 
@@ -1379,6 +1428,9 @@ def purchase_order_add():
             "Add at least one line item — every item needs a description, quantity, and unit cost.",
             "error",
         )
+        return redirect(url_for("main.purchase_orders"))
+    if data["allocationErrors"]:
+        flash(" ".join(data["allocationErrors"]), "error")
         return redirect(url_for("main.purchase_orders"))
 
     try:

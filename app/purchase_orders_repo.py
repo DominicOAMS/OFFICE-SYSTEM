@@ -184,8 +184,8 @@ def create_purchase_order(data, created_by):
                     """
                     INSERT INTO tbl_purchase_order_items
                         (purchaseOrderId, sequence, itemId, catalogCode, description, unit,
-                         quantity, quantityServed, unitCost, amount, allocation)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s)
+                         quantity, quantityServed, unitCost, amount)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 0, %s, %s)
                     """,
                     (
                         purchase_order_id,
@@ -197,9 +197,19 @@ def create_purchase_order(data, created_by):
                         item["quantity"],
                         item["unitCost"],
                         item["amount"],
-                        item["allocation"],
                     ),
                 )
+                item_id = cur.lastrowid
+
+                for alloc in item["allocations"]:
+                    cur.execute(
+                        """
+                        INSERT INTO tbl_purchase_order_item_allocations
+                            (purchaseOrderItemId, customerId, quantity)
+                        VALUES (%s, %s, %s)
+                        """,
+                        (item_id, alloc["customerId"], alloc["quantity"]),
+                    )
 
         conn.commit()
         return purchase_order_id, po_number
@@ -243,6 +253,39 @@ def list_items_for_purchase_orders(po_ids):
 def get_items_for_purchase_order(po_id):
     """One PO's items - thin wrapper so single-record callers don't build a list."""
     return list_items_for_purchase_orders([po_id]).get(int(po_id), [])
+
+
+def list_allocations_for_items(item_ids):
+    """Every customer allocation for a page of line items, keyed by
+    purchaseOrderItemId - same one-query-per-page shape as
+    list_items_for_purchase_orders, with the customer's code/name joined in
+    so callers don't need a second round trip to display who each row is for."""
+    item_ids = [int(i) for i in item_ids]
+    if not item_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(item_ids))
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT a.*, c.code AS customerCode, c.name AS customerName
+                FROM tbl_purchase_order_item_allocations a
+                JOIN tbl_customers c ON c.id = a.customerId
+                WHERE a.purchaseOrderItemId IN ({placeholders})
+                ORDER BY a.purchaseOrderItemId ASC, a.id ASC
+                """,
+                item_ids,
+            )
+            allocations = cur.fetchall()
+    finally:
+        conn.close()
+
+    by_item = {}
+    for alloc in allocations:
+        by_item.setdefault(alloc["purchaseOrderItemId"], []).append(alloc)
+    return by_item
 
 
 def soft_delete_purchase_order(po_id, updated_by):
