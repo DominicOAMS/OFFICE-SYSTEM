@@ -85,11 +85,14 @@
                         data-order-date="{{ po.orderDate or '' }}"
                         data-supplier-name="{{ po.supplierName or '—' }}"
                         data-supplier-address="{{ po.supplierAddress or '' }}"
+                        data-delivery-address="{{ po.deliveryAddress or '' }}"
+                        data-delivery-telephone="{{ po.deliveryTelephone or '' }}"
+                        data-delivery-mobile-number="{{ po.deliveryMobileNumber or '' }}"
                         data-delivery-term="{{ po.deliveryTerm or '' }}"
                         data-payment-term="{{ po.paymentTerm or '' }}"
                         data-delivery-date="{{ po.deliveryDate or '' }}"
                         data-payment-due-date="{{ po.paymentDueDate or '' }}"
-                        data-noa-number="{{ po.noaNumber or '' }}"
+                        data-price-code="{{ po.priceCode or '' }}"
                         data-notes="{{ po.notes or '' }}"
                         data-branch="{{ po.branch or '' }}"
                         data-vatable-amount="{{ po.vatableAmount or '' }}"
@@ -232,51 +235,94 @@
 
                 <div class="relative" data-dropdown>
                     <label class="label" for="supplierSearchInput">Supplier <span class="text-accent-600">*</span></label>
-                    <input type="text" class="input" id="supplierSearchInput" placeholder="Type a supplier's name…" autocomplete="off" required>
+                    <input type="text" class="input" id="supplierSearchInput" placeholder="Search by supplier ID or name…" autocomplete="off" required>
                     <input type="hidden" id="fieldSupplierId" name="supplierId">
                     <div data-dropdown-panel id="supplierOptions"
                          class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
                 </div>
 
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                        <label class="label" for="fieldBranch">Branch</label>
-                        <input type="text" class="input" id="fieldBranch" name="branch" placeholder="e.g. Calamba">
-                    </div>
-                    <div>
-                        <label class="label" for="fieldNoaNumber">NOA Number</label>
-                        <input type="text" class="input" id="fieldNoaNumber" name="noaNumber">
-                    </div>
+                <div id="supplierDetails" class="hidden grid grid-cols-1 gap-3 rounded-xl border border-slate-200
+                            bg-slate-50 p-4 sm:grid-cols-2 dark:border-slate-700 dark:bg-slate-800/50">
+                    <div><p class="help mb-0.5">Supplier ID</p><p id="supplierDetailCode" class="font-mono text-sm text-slate-900 dark:text-white">—</p></div>
+                    <div><p class="help mb-0.5">Address</p><p id="supplierDetailAddress" class="text-sm text-slate-700 dark:text-slate-300">—</p></div>
+                    <div><p class="help mb-0.5">Telephone</p><p id="supplierDetailTelephone" class="text-sm text-slate-700 dark:text-slate-300">—</p></div>
+                    <div><p class="help mb-0.5">Fax</p><p id="supplierDetailFax" class="text-sm text-slate-700 dark:text-slate-300">—</p></div>
+                    <div><p class="help mb-0.5">Email</p><p id="supplierDetailEmail" class="text-sm text-slate-700 dark:text-slate-300">—</p></div>
                 </div>
 
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                        <label class="label" for="fieldDeliveryTerm">Delivery Term</label>
-                        <input type="text" class="input" id="fieldDeliveryTerm" name="deliveryTerm">
+                <div class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                    <p class="text-sm font-medium text-slate-700 dark:text-slate-300">Delivery Information</p>
+
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                            <label class="label" for="fieldBranch">Branch</label>
+                            <input type="text" class="input" id="fieldBranch" name="branch" placeholder="e.g. Calamba">
+                            <p class="help">Delivery address/telephone/mobile below default from your registered branch.</p>
+                        </div>
+                        <div>
+                            <label class="label" for="fieldPriceCode">Price Code</label>
+                            <select class="input" id="fieldPriceCode" name="priceCode">
+                                <option value="">Select a supplier first</option>
+                            </select>
+                        </div>
                     </div>
-                    <div>
-                        <label class="label" for="fieldPaymentTerm">Payment Term</label>
-                        <input type="text" class="input" id="fieldPaymentTerm" name="paymentTerm">
+
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <div>
+                            <label class="label" for="fieldDeliveryAddress">Delivery Address</label>
+                            <input type="text" class="input" id="fieldDeliveryAddress" name="deliveryAddress">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldDeliveryTelephone">Telephone Number</label>
+                            <input type="text" class="input" id="fieldDeliveryTelephone" name="deliveryTelephone">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldDeliveryMobileNumber">Mobile Number</label>
+                            <input type="text" class="input" id="fieldDeliveryMobileNumber" name="deliveryMobileNumber">
+                        </div>
                     </div>
-                    <div>
-                        <label class="label" for="fieldDeliveryDate">Delivery Date</label>
-                        <input type="date" class="input" id="fieldDeliveryDate" name="deliveryDate">
-                    </div>
-                    <div>
-                        <label class="label" for="fieldPaymentDueDate">Payment Due Date</label>
-                        <input type="date" class="input" id="fieldPaymentDueDate" name="paymentDueDate">
+
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                            <label class="label" for="fieldDeliveryTerm">Delivery Term</label>
+                            <input type="text" class="input" id="fieldDeliveryTerm" name="deliveryTerm">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldPaymentTerm">Payment Term</label>
+                            <select class="input" id="fieldPaymentTerm" name="paymentTerm">
+                                <option>15 days</option>
+                                <option>30 days</option>
+                                <option selected>45 days</option>
+                                <option>60 days</option>
+                                <option>90 days</option>
+                                <option>C.O.D</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="label" for="fieldPoDate">PO Date</label>
+                            <input type="date" class="input" id="fieldPoDate" name="orderDate">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldDeliveryDate">Expected Delivery Date</label>
+                            <input type="date" class="input" id="fieldDeliveryDate" name="deliveryDate">
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="label" for="fieldPaymentDueDate">Payment Due Date</label>
+                            <input type="date" class="input bg-slate-100 dark:bg-slate-800" id="fieldPaymentDueDate" name="paymentDueDate" readonly>
+                            <p class="help">Auto-computed from Expected Delivery Date + Payment Term.</p>
+                        </div>
                     </div>
                 </div>
 
                 <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
                     <label class="label">Line Items <span class="text-accent-600">*</span></label>
-                    <p class="help mb-3">
-                        Search the item catalog to fill in description and unit, or type your own — quantity and unit cost are always entered manually.
+                    <p class="help mb-3" id="itemsHelp">
+                        Choose a supplier and price code above to search its priced products — only products the supplier has priced under that code can be added.
                     </p>
 
                     <div id="itemsList" class="space-y-3"></div>
 
-                    <button type="button" class="btn btn-secondary mt-3" id="addItemBtn">
+                    <button type="button" class="btn btn-secondary mt-3" id="addItemBtn" disabled>
                         <i data-lucide="plus" class="h-4 w-4"></i>Add Line Item
                     </button>
 
@@ -351,7 +397,7 @@
 
         <div class="relative" data-dropdown>
             <label class="label">Catalog / Description <span class="text-accent-600">*</span></label>
-            <input type="text" class="js-item-catalog-search input" autocomplete="off" placeholder="Search catalog # or item name, or type your own…">
+            <input type="text" class="js-item-catalog-search input" autocomplete="off" placeholder="Search this supplier's priced products…">
             <div class="js-item-catalog-panel hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg
                         border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
         </div>
@@ -398,7 +444,10 @@
                 <div><p class="help mb-0.5">Supplier</p><p id="viewSupplier" class="text-slate-700 dark:text-slate-300"></p></div>
                 <div><p class="help mb-0.5">Branch</p><p id="viewBranch" class="text-slate-700 dark:text-slate-300"></p></div>
                 <div><p class="help mb-0.5">Order Date</p><p id="viewOrderDate" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">NOA Number</p><p id="viewNoaNumber" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Price Code</p><p id="viewPriceCode" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Delivery Address</p><p id="viewDeliveryAddress" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Delivery Telephone</p><p id="viewDeliveryTelephone" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Delivery Mobile</p><p id="viewDeliveryMobileNumber" class="text-slate-700 dark:text-slate-300"></p></div>
                 <div><p class="help mb-0.5">Delivery Term</p><p id="viewDeliveryTerm" class="text-slate-700 dark:text-slate-300"></p></div>
                 <div><p class="help mb-0.5">Payment Term</p><p id="viewPaymentTerm" class="text-slate-700 dark:text-slate-300"></p></div>
                 <div><p class="help mb-0.5">Delivery Date</p><p id="viewDeliveryDate" class="text-slate-700 dark:text-slate-300"></p></div>
@@ -493,10 +542,40 @@
     (function () {
         var SUPPLIERS = {{ suppliers|tojson }};
         var APPROVERS = {{ approvers|tojson }};
-        var INVENTORY_ITEMS = {{ inventory_items|tojson }};
+        var SUPPLIER_PRICE_CODES = {{ supplier_price_codes|tojson }};
+        var USER_BRANCH = {{ (session.get('user_branch') or '')|tojson }};
+
+        // Requirement 2: legacy hardcodes these same Calamba values into every
+        // PO regardless of branch (purchase_order.blade.php) and only varies
+        // the printed "Place of Delivery" text for Bicol, never these fields -
+        // this makes it genuinely branch-conditional instead.
+        var BRANCH_DELIVERY_DEFAULTS = {
+            'Calamba': {
+                address: 'ONE AGNO MEDIAL SOLUTIONS, ONE AMS Bldg., Block 1, Lot 17 Kayamanan St., ' +
+                    'Tierra Valiente Subd., Pamana Homes, Brgy. Bucal, Calamba City, Laguna 4027',
+                telephone: '(049)502-0314;8315040',
+                mobile: '09178216261/09238984858'
+            },
+            'Bicol': {
+                address: 'One AMS Bicol, Lots 4 & 5, Block 3 Corner of Road Lot 1 and Road Lot 2, ' +
+                    'Parkview Executive Townhomes, Brgy. San Felipe, Naga City',
+                telephone: '(049)502-0314;8315040',
+                mobile: '09178216261/09238984858'
+            }
+        };
+
+        // Same six values as the legacy dropdown (purchase_order.blade.php) - "C.O.D"
+        // maps to 0 days: legacy's own due-date math breaks on it (parseInt("C.O.D") is
+        // NaN), so due date = delivery date here instead of reproducing that bug.
+        var PAYMENT_TERM_DAYS = { '15 days': 15, '30 days': 30, '45 days': 45, '60 days': 60, '90 days': 90, 'C.O.D': 0 };
 
         var recordForm = document.getElementById('recordForm');
         var tbody = document.getElementById('recordsBody');
+
+        function todayIso() {
+            var d = new Date();
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
 
         /* ------------------------------------------------- searchable name pickers
            Same [data-dropdown] contract as fuel_po.html's initSearchablePicker: visible
@@ -511,7 +590,8 @@
             });
         }
 
-        function initSearchablePicker(inputId, hiddenId, panelId, items, getId, getLabel) {
+        function initSearchablePicker(inputId, hiddenId, panelId, items, getId, getLabel, getOptionText) {
+            getOptionText = getOptionText || getLabel;
             var input = document.getElementById(inputId);
             var hidden = document.getElementById(hiddenId);
             var panel = document.getElementById(panelId);
@@ -520,12 +600,12 @@
             function render(filterText) {
                 var term = (filterText || '').trim().toLowerCase();
                 var matches = items.filter(function (item) {
-                    return !term || getLabel(item).toLowerCase().indexOf(term) !== -1;
+                    return !term || getOptionText(item).toLowerCase().indexOf(term) !== -1;
                 });
                 panel.innerHTML = matches.length
                     ? matches.map(function (item) {
                         return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-id="'
-                            + getId(item) + '" data-name="' + getLabel(item).replace(/"/g, '&quot;') + '">' + getLabel(item) + '</button>';
+                            + getId(item) + '" data-name="' + getLabel(item).replace(/"/g, '&quot;') + '">' + escapeHtml(getOptionText(item)) + '</button>';
                     }).join('')
                     : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matches</p>';
             }
@@ -541,6 +621,7 @@
 
             input.addEventListener('input', function () {
                 hidden.value = '';
+                hidden.dispatchEvent(new Event('change'));
                 render(input.value);
                 panel.classList.remove('hidden');
             });
@@ -556,6 +637,7 @@
                 reset: function () {
                     input.value = '';
                     hidden.value = '';
+                    hidden.dispatchEvent(new Event('change'));
                     render('');
                 },
             };
@@ -563,12 +645,117 @@
 
         var supplierPicker = initSearchablePicker(
             'supplierSearchInput', 'fieldSupplierId', 'supplierOptions', SUPPLIERS,
-            function (s) { return s.id; }, function (s) { return s.name; }
+            function (s) { return s.id; }, function (s) { return s.name; },
+            function (s) { return (s.code || '') + ' — ' + s.name; }
         );
         var approverPicker = initSearchablePicker(
             'approverSearchInput', 'fieldApproverUserId', 'approverOptions', APPROVERS,
             function (a) { return a.userId; }, function (a) { return a.name; }
         );
+
+        /* ------------------------------------------------- supplier details card
+           Requirement 1: grouped, tidy view of the selected supplier's own info. */
+
+        var supplierDetails = document.getElementById('supplierDetails');
+
+        function findSupplierById(id) {
+            for (var i = 0; i < SUPPLIERS.length; i++) {
+                if (String(SUPPLIERS[i].id) === String(id)) return SUPPLIERS[i];
+            }
+            return null;
+        }
+
+        function showSupplierDetails(supplier) {
+            if (!supplier) {
+                supplierDetails.classList.add('hidden');
+                return;
+            }
+            document.getElementById('supplierDetailCode').textContent = supplier.code || '—';
+            document.getElementById('supplierDetailAddress').textContent = supplier.address || '—';
+            document.getElementById('supplierDetailTelephone').textContent = supplier.telephoneNumber || '—';
+            document.getElementById('supplierDetailFax').textContent = supplier.faxNumber || '—';
+            document.getElementById('supplierDetailEmail').textContent = supplier.email || '—';
+            supplierDetails.classList.remove('hidden');
+        }
+
+        /* ------------------------------------------------- price code (requirement 3)
+           Lists the selected supplier's own distinct price codes; a single code is
+           selected automatically since there's nothing else to choose. */
+
+        var fieldPriceCode = document.getElementById('fieldPriceCode');
+
+        function populatePriceCodeOptions(supplierId) {
+            fieldPriceCode.innerHTML = '';
+            var placeholder = document.createElement('option');
+            placeholder.value = '';
+
+            if (!supplierId) {
+                placeholder.textContent = 'Select a supplier first';
+                fieldPriceCode.appendChild(placeholder);
+                fieldPriceCode.disabled = true;
+                return;
+            }
+            var codes = SUPPLIER_PRICE_CODES[supplierId] || [];
+            if (!codes.length) {
+                placeholder.textContent = 'No price codes on file for this supplier';
+                fieldPriceCode.appendChild(placeholder);
+                fieldPriceCode.disabled = true;
+                return;
+            }
+            fieldPriceCode.disabled = false;
+            codes.forEach(function (code) {
+                var opt = document.createElement('option');
+                opt.value = code;
+                opt.textContent = code;
+                fieldPriceCode.appendChild(opt);
+            });
+            fieldPriceCode.value = codes[0];
+        }
+
+        document.getElementById('fieldSupplierId').addEventListener('change', function () {
+            var supplier = this.value ? findSupplierById(this.value) : null;
+            showSupplierDetails(supplier);
+            populatePriceCodeOptions(this.value || null);
+            fieldPriceCode.dispatchEvent(new Event('change'));
+        });
+
+        /* ------------------------------------------------- branch delivery defaults
+           Requirement 2: keyed off the Branch field, which itself defaults to the
+           logged-in user's own registered branch when the modal opens. */
+
+        var fieldBranch = document.getElementById('fieldBranch');
+
+        function applyBranchDeliveryDefaults() {
+            var defaults = BRANCH_DELIVERY_DEFAULTS[fieldBranch.value.trim()];
+            if (!defaults) return;
+            document.getElementById('fieldDeliveryAddress').value = defaults.address;
+            document.getElementById('fieldDeliveryTelephone').value = defaults.telephone;
+            document.getElementById('fieldDeliveryMobileNumber').value = defaults.mobile;
+        }
+
+        fieldBranch.addEventListener('input', applyBranchDeliveryDefaults);
+        fieldBranch.addEventListener('change', applyBranchDeliveryDefaults);
+
+        /* ------------------------------------------------- payment due date (requirement 2)
+           Expected Delivery Date + the chosen Payment Term's day count. */
+
+        function recomputePaymentDueDate() {
+            var deliveryVal = document.getElementById('fieldDeliveryDate').value;
+            var dueField = document.getElementById('fieldPaymentDueDate');
+            if (!deliveryVal) {
+                dueField.value = '';
+                return;
+            }
+            var term = document.getElementById('fieldPaymentTerm').value;
+            var days = PAYMENT_TERM_DAYS.hasOwnProperty(term) ? PAYMENT_TERM_DAYS[term] : 0;
+            var d = new Date(deliveryVal + 'T00:00:00');
+            d.setDate(d.getDate() + days);
+            dueField.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+
+        document.getElementById('fieldDeliveryDate').addEventListener('input', recomputePaymentDueDate);
+        document.getElementById('fieldDeliveryDate').addEventListener('change', recomputePaymentDueDate);
+        document.getElementById('fieldPaymentTerm').addEventListener('change', recomputePaymentDueDate);
 
         /* ------------------------------------------------- attachment preview */
         var attachmentInput = document.getElementById('fieldAttachment');
@@ -635,52 +822,62 @@
             };
         }
 
-        /* ------------------------------------------------- per-row catalog picker */
+        /* ------------------------------------------------- per-row catalog picker
+           Requirement 4: sourced from currentSupplierProducts (that supplier's own
+           products priced under the chosen price code), not the generic inventory
+           master, and typing that doesn't land on a pick isn't a valid line - only
+           products actually offered under that code can go on the PO. */
 
         function initItemCatalogPicker(row, item) {
             var input = row.querySelector('.js-item-catalog-search');
             var panel = row.querySelector('.js-item-catalog-panel');
             searchablePanels.push(panel);
 
-            function label(inv) { return inv.catalog + ' — ' + (inv.description || ''); }
+            function label(p) { return p.catalog + ' — ' + (p.description || ''); }
 
             function render(filterText) {
                 var term = (filterText || '').trim().toLowerCase();
-                var matches = !term ? [] : INVENTORY_ITEMS.filter(function (inv) {
-                    return inv.catalog.toLowerCase().indexOf(term) !== -1
-                        || (inv.description || '').toLowerCase().indexOf(term) !== -1;
-                }).slice(0, 30);
+                var matches = currentSupplierProducts.filter(function (p) {
+                    return !term
+                        || p.catalog.toLowerCase().indexOf(term) !== -1
+                        || (p.description || '').toLowerCase().indexOf(term) !== -1;
+                });
                 panel.innerHTML = matches.length
-                    ? matches.map(function (inv, idx) {
+                    ? matches.map(function (p, idx) {
                         return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-idx="' + idx + '">'
-                            + escapeHtml(label(inv)) + '</button>';
+                            + escapeHtml(label(p)) + '</button>';
                     }).join('')
-                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">Type to search, or just type a description below and use it as-is</p>';
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matching priced product</p>';
                 panel._matches = matches;
+            }
+
+            function selectProduct(p) {
+                item.catalogCode = p.catalog;
+                item.description = p.description || '';
+                item.unit = p.unit || '';
+                input.value = label(p);
+                row.querySelector('.js-item-unit').value = item.unit;
+                if (p.price != null) {
+                    item.unitCost = p.price;
+                    row.querySelector('.js-item-unit-cost').value = p.price;
+                }
+                panel.classList.add('hidden');
+                syncItems();
             }
 
             panel.addEventListener('click', function (e) {
                 var btn = e.target.closest('button[data-idx]');
                 if (!btn || !panel._matches) return;
-                var inv = panel._matches[parseInt(btn.getAttribute('data-idx'), 10)];
-                if (!inv) return;
-                item.itemId = inv.id;
-                item.catalogCode = inv.catalog;
-                item.description = inv.description || '';
-                item.unit = inv.baseUnit || inv.purchaseUnit || inv.salesUnit || '';
-                input.value = label(inv);
-                row.querySelector('.js-item-unit').value = item.unit;
-                panel.classList.add('hidden');
-                syncItems();
+                var p = panel._matches[parseInt(btn.getAttribute('data-idx'), 10)];
+                if (p) selectProduct(p);
             });
 
             input.addEventListener('input', function () {
-                // Free typing breaks the catalog link - this becomes a manual, unlinked
-                // line item, exactly like a legacy catalog code with no matching inventory
-                // row. The description itself (not the search box) is the source of truth.
-                item.itemId = null;
+                // Not a pick from the panel - clear the link rather than letting a
+                // previous selection's values sit there looking like they belong to
+                // whatever's now typed. The row stays incomplete until a real pick.
                 item.catalogCode = '';
-                item.description = input.value;
+                item.description = '';
                 render(input.value);
                 panel.classList.remove('hidden');
                 syncItems();
@@ -764,11 +961,59 @@
             syncItems();
         }
 
-        function resetItems() {
+        function resetItems(autoAddFirst) {
             items = [];
             itemsList.innerHTML = '';
-            addItem();
+            if (autoAddFirst) {
+                addItem();
+            } else {
+                syncItems();
+            }
         }
+
+        /* ------------------------------------------------- supplier-scoped products
+           Requirement 4: refetched whenever supplier or price code changes; every
+           existing line-item picker reads from this same shared array (updated in
+           place further down via currentSupplierProducts = ...), and rows are reset
+           because a row picked under the old scope may no longer be valid. */
+
+        var currentSupplierProducts = [];
+        var itemsHelp = document.getElementById('itemsHelp');
+        var addItemBtn = document.getElementById('addItemBtn');
+
+        function refreshSupplierProducts() {
+            var supplierId = document.getElementById('fieldSupplierId').value;
+            var priceCode = fieldPriceCode.value;
+
+            if (!supplierId || !priceCode) {
+                currentSupplierProducts = [];
+                addItemBtn.disabled = true;
+                itemsHelp.textContent = 'Choose a supplier and price code above to search its priced products — only products the supplier has priced under that code can be added.';
+                resetItems(false);
+                return;
+            }
+
+            itemsHelp.textContent = 'Loading priced products…';
+            fetch('{{ url_for("main.purchase_order_supplier_products") }}?supplierId=' + encodeURIComponent(supplierId)
+                    + '&priceCode=' + encodeURIComponent(priceCode))
+                .then(function (r) { return r.json(); })
+                .then(function (products) {
+                    currentSupplierProducts = products;
+                    addItemBtn.disabled = products.length === 0;
+                    itemsHelp.textContent = products.length
+                        ? ('Only this supplier’s products priced under "' + priceCode + '" can be added (' + products.length + ' available).')
+                        : 'This supplier has no products priced under this price code yet.';
+                    resetItems(products.length > 0);
+                })
+                .catch(function () {
+                    currentSupplierProducts = [];
+                    addItemBtn.disabled = true;
+                    itemsHelp.textContent = 'Could not load this supplier’s priced products.';
+                    resetItems(false);
+                });
+        }
+
+        fieldPriceCode.addEventListener('change', refreshSupplierProducts);
 
         itemsList.addEventListener('click', function (e) {
             var btn = e.target.closest('[data-action]');
@@ -812,6 +1057,9 @@
             }
             for (var i = 0; i < items.length; i++) {
                 var it = items[i], n = i + 1;
+                if (!(it.catalogCode || '').trim()) {
+                    e.preventDefault(); alert('Line item ' + n + ' needs a product picked from the priced list.'); return;
+                }
                 if (!(it.description || '').trim()) {
                     e.preventDefault(); alert('Line item ' + n + ' needs a description.'); return;
                 }
@@ -828,16 +1076,23 @@
         document.getElementById('addNewBtn').addEventListener('click', function () {
             recordForm.reset();
             attachmentPreviewWrap.classList.add('hidden');
+            // supplierPicker.reset() cascades (via the fieldSupplierId 'change' it
+            // dispatches) into clearing the price code select and line items too -
+            // see the fieldSupplierId listener and refreshSupplierProducts() above.
             supplierPicker.reset();
             approverPicker.reset();
-            resetItems();
+            fieldBranch.value = USER_BRANCH;
+            applyBranchDeliveryDefaults();
+            document.getElementById('fieldPoDate').value = todayIso();
             OS.openModal('recordModal');
         });
 
         /* --------------------------------------------------------- view/approve/reject/delete */
         var viewFields = {
             viewPoNumber: 'po-number', viewSupplier: 'supplier-name', viewBranch: 'branch',
-            viewOrderDate: 'order-date', viewNoaNumber: 'noa-number',
+            viewOrderDate: 'order-date', viewPriceCode: 'price-code',
+            viewDeliveryAddress: 'delivery-address', viewDeliveryTelephone: 'delivery-telephone',
+            viewDeliveryMobileNumber: 'delivery-mobile-number',
             viewDeliveryTerm: 'delivery-term', viewPaymentTerm: 'payment-term',
             viewDeliveryDate: 'delivery-date', viewPaymentDueDate: 'payment-due-date',
             viewCreatedBy: 'created-by-name', viewStatus: 'status', viewApprover: 'approver-name',

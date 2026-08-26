@@ -10,6 +10,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -1217,7 +1218,7 @@ def purchase_orders():
         purchase_orders=records,
         items_by_po=items_by_po,
         suppliers=suppliers_repo.list_active_suppliers(),
-        inventory_items=purchase_orders_repo.list_active_inventory_items(),
+        supplier_price_codes=suppliers_repo.list_price_codes_by_supplier(),
         approvers=purchase_order_approvers_repo.list_approvers(),
         search=search,
         status=status,
@@ -1228,7 +1229,35 @@ def purchase_orders():
     )
 
 
-def _parse_items(raw_json):
+@main_bp.route("/page/purchase_order_orders/supplier-products")
+@login_required
+def purchase_order_supplier_products():
+    """Feeds the Add Purchase Order form's line-item catalog picker: only the
+    selected supplier's products currently priced under the selected price
+    code, per requirement 4 - a PO can only be raised against what that
+    supplier actually offers under that code."""
+    supplier_id = request.args.get("supplierId", "").strip()
+    if not supplier_id.isdigit():
+        return jsonify([])
+    price_code = request.args.get("priceCode", "").strip() or None
+
+    products = suppliers_repo.list_products_for_supplier(
+        int(supplier_id), price_code=price_code, has_price_code=True
+    )
+    return jsonify(
+        [
+            {
+                "catalog": p["catalog"],
+                "description": p["description"],
+                "unit": p["unit"],
+                "price": float(p["price"]) if p["price"] is not None else None,
+            }
+            for p in products
+        ]
+    )
+
+
+def _parse_items(raw_json, valid_catalogs=None):
     """The repeatable line-items payload from the Add form.
 
     A whole line is DROPPED (not silently patched) when it's missing a description, a
@@ -1236,6 +1265,11 @@ def _parse_items(raw_json):
     so a malformed payload surfaces as "add at least one item" instead of quietly creating
     a PO whose total doesn't match what the requester saw on screen. amount is computed
     here, never trusted from the client.
+
+    valid_catalogs, when given, is the set of catalogs the chosen supplier actually has
+    priced under the chosen price code (requirement 4) - a line whose catalog isn't in
+    that set is dropped the same way, so the client's scoped picker can't be bypassed by
+    posting an arbitrary catalog string directly.
     """
     try:
         parsed = json.loads(raw_json or "[]")
@@ -1251,13 +1285,15 @@ def _parse_items(raw_json):
         description = _clip((entry.get("description") or "").strip())
         quantity = _parse_coordinate(str(entry.get("quantity", "")))
         unit_cost = _parse_coordinate(str(entry.get("unitCost", "")))
-        item_id_raw = str(entry.get("itemId", "")).strip()
+        catalog_code = _clip((entry.get("catalogCode") or "").strip()) or None
         if not description or quantity is None or quantity <= 0 or unit_cost is None or unit_cost < 0:
+            continue
+        if valid_catalogs is not None and catalog_code not in valid_catalogs:
             continue
         items.append(
             {
-                "itemId": int(item_id_raw) if item_id_raw.isdigit() else None,
-                "catalogCode": _clip((entry.get("catalogCode") or "").strip()) or None,
+                "itemId": None,
+                "catalogCode": catalog_code,
                 "description": description,
                 "unit": _clip((entry.get("unit") or "").strip(), limit=30) or None,
                 "quantity": Decimal(str(quantity)),
@@ -1272,9 +1308,21 @@ def _parse_items(raw_json):
 def _parse_purchase_order_form():
     supplier_id = request.form.get("supplierId", "").strip()
     approver_user_id = request.form.get("approverUserId", "").strip()
-    items = _parse_items(request.form.get("itemsJson"))
+    price_code = _clip(request.form.get("priceCode", "").strip()) or None
 
     supplier = suppliers_repo.get_supplier(int(supplier_id)) if supplier_id.isdigit() else None
+
+    valid_catalogs = None
+    if supplier:
+        valid_catalogs = {
+            p["catalog"]
+            for p in suppliers_repo.list_products_for_supplier(
+                supplier["id"], price_code=price_code, has_price_code=True
+            )
+            if p["catalog"]
+        }
+
+    items = _parse_items(request.form.get("itemsJson"), valid_catalogs)
 
     # Money is always derived from items, never trusted from the client - the legacy
     # migration found stored totals that had drifted from their own line items, which is
@@ -1296,6 +1344,7 @@ def _parse_purchase_order_form():
         "supplierTelephone": supplier["telephoneNumber"] if supplier else None,
         "supplierFax": supplier["faxNumber"] if supplier else None,
         "supplierEmail": supplier["email"] if supplier else None,
+        "orderDate": request.form.get("orderDate", "").strip() or None,
         "deliveryAddress": _clip(request.form.get("deliveryAddress", "").strip()) or None,
         "deliveryTelephone": _clip(request.form.get("deliveryTelephone", "").strip(), limit=100) or None,
         "deliveryMobileNumber": _clip(request.form.get("deliveryMobileNumber", "").strip(), limit=100) or None,
@@ -1306,7 +1355,7 @@ def _parse_purchase_order_form():
         "vatableAmount": vatable_amount,
         "vatAmount": vat_amount,
         "totalAmount": total_amount,
-        "noaNumber": _clip(request.form.get("noaNumber", "").strip()) or None,
+        "priceCode": price_code,
         "notes": _clip(request.form.get("notes", "").strip()) or None,
         "branch": _clip(request.form.get("branch", "").strip(), limit=100) or None,
         "approverUserId": int(approver_user_id) if approver_user_id.isdigit() else None,

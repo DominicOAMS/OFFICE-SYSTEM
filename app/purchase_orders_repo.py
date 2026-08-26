@@ -137,11 +137,11 @@ def create_purchase_order(data, created_by):
                      supplierTelephone, supplierFax, supplierEmail,
                      deliveryAddress, deliveryTelephone, deliveryMobileNumber,
                      deliveryTerm, paymentTerm, deliveryDate, paymentDueDate,
-                     vatableAmount, vatAmount, totalAmount, status, noaNumber, notes,
+                     vatableAmount, vatAmount, totalAmount, status, priceCode, notes,
                      attachmentPath, branch, approverUserId,
                      isDeleted, createdBy, createdAt, updatedBy, updatedAt)
                 VALUES
-                    (%s, CURDATE(), %s, %s, %s,
+                    (%s, COALESCE(%s, CURDATE()), %s, %s, %s,
                      %s, %s, %s,
                      %s, %s, %s,
                      %s, %s, %s, %s,
@@ -151,6 +151,7 @@ def create_purchase_order(data, created_by):
                 """,
                 (
                     po_number,
+                    data["orderDate"],
                     data["supplierId"],
                     data["supplierName"],
                     data["supplierAddress"],
@@ -167,7 +168,7 @@ def create_purchase_order(data, created_by):
                     data["vatableAmount"],
                     data["vatAmount"],
                     data["totalAmount"],
-                    data["noaNumber"],
+                    data["priceCode"],
                     data["notes"],
                     data["attachmentPath"],
                     data["branch"],

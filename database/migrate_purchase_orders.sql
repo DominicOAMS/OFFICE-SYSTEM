@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS db_os_2026.tbl_purchase_orders (
     vatAmount DECIMAL(14,2) NULL,
     totalAmount DECIMAL(14,2) NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'Draft',
-    noaNumber VARCHAR(255) NULL,
+    priceCode VARCHAR(255) NULL,
     notes VARCHAR(255) NULL,
     attachmentPath VARCHAR(255) NULL,
     branch VARCHAR(100) NULL,
@@ -153,7 +153,7 @@ INSERT INTO db_os_2026.tbl_purchase_orders
      supplierTelephone, supplierFax, supplierEmail,
      deliveryAddress, deliveryTelephone, deliveryMobileNumber,
      deliveryTerm, paymentTerm, deliveryDate, paymentDueDate,
-     vatableAmount, vatAmount, totalAmount, status, noaNumber, notes,
+     vatableAmount, vatAmount, totalAmount, status, priceCode, notes,
      attachmentPath, branch, isDeleted, createdBy, createdAt, updatedBy, updatedAt)
 SELECT
     TRIM(p.PONumber),

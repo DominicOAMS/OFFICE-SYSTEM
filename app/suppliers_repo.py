@@ -375,6 +375,31 @@ def list_price_codes_for_supplier(supplier_id):
         conn.close()
 
 
+def list_price_codes_by_supplier():
+    """Every active supplier's distinct price codes, keyed by supplierId - one
+    query, embedded client-side on the Purchase Order form so picking a
+    supplier can instantly show/default its price code without a round trip
+    (same reasoning as embedding the full supplier list itself there)."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT supplierId, priceCode FROM tbl_suppliers_products
+                WHERE isDeleted = 0 AND priceCode IS NOT NULL AND priceCode <> ''
+                ORDER BY supplierId ASC, priceCode ASC
+                """
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    by_supplier = {}
+    for row in rows:
+        by_supplier.setdefault(row["supplierId"], []).append(row["priceCode"])
+    return by_supplier
+
+
 def list_catalog_suggestions(supplier_id):
     """Catalogs this supplier already quotes, plus the inventory master list.
     Scoped to one supplier rather than all of them: the full cross-supplier list
