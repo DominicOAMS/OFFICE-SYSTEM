@@ -262,16 +262,6 @@
                          class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
                 </div>
 
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <div class="sm:col-span-2">
-                        <label class="label" for="fieldSoldTo">Sold To</label>
-                        <input type="text" class="input" id="fieldSoldTo" name="soldTo">
-                    </div>
-                    <div>
-                        <label class="label" for="fieldTin">TIN</label>
-                        <input type="text" class="input" id="fieldTin" name="tin">
-                    </div>
-                </div>
                 <div>
                     <label class="label" for="fieldAddress">Address</label>
                     <input type="text" class="input" id="fieldAddress" name="address">
@@ -627,24 +617,24 @@
         );
 
         var fieldCustomerId = document.getElementById('fieldCustomerId');
-        var fieldSoldTo = document.getElementById('fieldSoldTo');
         var fieldAddress = document.getElementById('fieldAddress');
-        var fieldTin = document.getElementById('fieldTin');
         var fieldPaymentTerms = document.getElementById('fieldPaymentTerms');
         var fieldPaymentDueDate = document.getElementById('fieldPaymentDueDate');
         var fieldInvoiceDate = document.getElementById('fieldInvoiceDate');
 
-        // Suggests into EMPTY fields only ("suggest, never lock" - same rule the supplier-
-        // invoice-number suggestion follows in Warehouse Transactions), and refreshes the
-        // per-catalog price map for the line-item picker below.
+        // Sold To / TIN aren't editable fields at all - they're always the selected
+        // customer's name/TIN, set server-side from customerId (see
+        // routes._parse_invoice_form). Address still is, since a delivery address
+        // legitimately varies invoice to invoice; it's only ever a suggestion here
+        // ("suggest, never lock" - same rule the supplier-invoice-number suggestion
+        // follows in Warehouse Transactions). This also refreshes the per-catalog price
+        // map for the line-item picker below.
         fieldCustomerId.addEventListener('change', function () {
             var selectedId = fieldCustomerId.value;
             CUSTOMER_PRICES = {};
             var c = CUSTOMERS.find(function (x) { return String(x.id) === selectedId; });
             if (!c) return;
-            if (!fieldSoldTo.value.trim()) fieldSoldTo.value = c.name || '';
             if (!fieldAddress.value.trim()) fieldAddress.value = c.address || '';
-            if (!fieldTin.value.trim()) fieldTin.value = c.tin || '';
             if (!fieldPaymentTerms.value.trim() && c.paymentTermDays != null) {
                 fieldPaymentTerms.value = c.paymentTermDays + ' days';
             }
@@ -1017,9 +1007,7 @@
             CUSTOMER_PRICES = {};
             stockOutUserTouched = true; // editing never re-creates a Stock Out, so the auto-toggle is irrelevant
 
-            fieldSoldTo.value = row.getAttribute('data-sold-to') || '';
             fieldAddress.value = row.getAttribute('data-address') || '';
-            fieldTin.value = row.getAttribute('data-tin') || '';
             fieldInvoiceDate.value = row.getAttribute('data-invoice-date') || '';
             document.getElementById('fieldBranch').value = row.getAttribute('data-branch') || '';
             fieldPaymentTerms.value = row.getAttribute('data-payment-terms') || '';

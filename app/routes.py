@@ -2062,11 +2062,14 @@ def _parse_invoice_items(raw_json):
 
 
 def _parse_invoice_form():
-    """Resolves the customer and snapshots soldTo/address/tin from the FORM (not re-read
-    from tbl_customers at save time) so an invoice freezes what it said - same reasoning as
-    create_purchase_order's supplier snapshot. Money is always derived from items, never
-    trusted from the client - VAT-INCLUSIVE (see invoices_repo's module docstring for why
-    this is the opposite of the Purchase Order convention)."""
+    """Resolves the customer and snapshots soldTo/address/tin so an invoice freezes what it
+    said - same reasoning as create_purchase_order's supplier snapshot. soldTo/tin are NOT
+    form fields - they're always the selected customer's current name/TIN, captured here at
+    save time (still a snapshot: a later change to the customer's name/TIN doesn't retroactively
+    alter an already-saved invoice). Address stays a form field since a delivery address
+    legitimately varies invoice to invoice. Money is always derived from items, never trusted
+    from the client - VAT-INCLUSIVE (see invoices_repo's module docstring for why this is the
+    opposite of the Purchase Order convention)."""
     customer_id = request.form.get("customerId", "").strip()
     customer = customers_repo.get_customer(int(customer_id)) if customer_id.isdigit() else None
 
@@ -2082,9 +2085,9 @@ def _parse_invoice_form():
     return {
         "customerId": customer["id"] if customer else None,
         "customerCode": customer["code"] if customer else None,
-        "soldTo": _clip(request.form.get("soldTo", "").strip()) or None,
+        "soldTo": customer["name"] if customer else None,
         "address": _clip(request.form.get("address", "").strip()) or None,
-        "tin": _clip(request.form.get("tin", "").strip(), limit=30) or None,
+        "tin": customer["tin"] if customer else None,
         "customerPo": _clip(request.form.get("customerPo", "").strip(), limit=100) or None,
         "paymentTerms": _clip(request.form.get("paymentTerms", "").strip(), limit=100) or None,
         "paymentDueDate": request.form.get("paymentDueDate", "").strip() or None,
