@@ -27,6 +27,7 @@ from . import (
     fuel_po_repo,
     fuel_prices_repo,
     inventory_items_repo,
+    invoices_repo,
     program_menu_repo,
     purchase_order_approvers_repo,
     purchase_orders_repo,
@@ -1708,6 +1709,10 @@ def _parse_warehouse_transaction_form():
         "careTo": _clip(request.form.get("careTo", "").strip()) or None,
         "note": _clip(request.form.get("note", "").strip()) or None,
         "branch": _clip(request.form.get("branch", "").strip(), limit=100) or None,
+        # Never a form field - only invoices_repo.create_invoice() sets this, by calling
+        # insert_transaction() directly with its own data dict rather than through this
+        # parser. Manual Stock In/Out from this page is never invoice-linked.
+        "invoiceId": None,
         "items": items,
     }
 
@@ -1947,6 +1952,344 @@ def warehouse_stocks_item_delete(item_id):
     inventory_items_repo.soft_delete_item(item_id, updated_by=session.get("user_id"))
     flash("Item deleted.", "success")
     return redirect(url_for("main.warehouse_stocks"))
+
+
+INVOICE_PER_PAGE = 30
+MAX_INVOICE_ITEMS = 50
+
+
+def _invoice_item_for_view(item):
+    """JSON-safe primitives for the View modal's line-item breakdown AND the Edit form's
+    prefill (same data-items attribute feeds both) - Decimal/date don't serialize the way
+    either one needs via |tojson. Same shape as _txn_item_for_view plus unitPrice/amount,
+    which are Decimal here (this table has money, warehouse transactions don't)."""
+    return {
+        "itemId": item["itemId"],
+        "catalogCode": item["catalogCode"],
+        "description": item["description"],
+        "unit": item["unit"],
+        "category": item["category"],
+        "quantity": item["quantity"],
+        "enteredQuantity": item["enteredQuantity"],
+        "enteredPackSize": item["enteredPackSize"],
+        "lot": item["lot"],
+        "expiryDate": item["expiryDate"].isoformat() if item["expiryDate"] else None,
+        "unitPrice": float(item["unitPrice"]) if item["unitPrice"] is not None else None,
+        "amount": float(item["amount"]) if item["amount"] is not None else None,
+    }
+
+
+def _invoice_txn_for_view(txn):
+    """JSON-safe primitives for an invoice's linked-transaction summary list."""
+    return {
+        "id": txn["id"],
+        "direction": txn["direction"],
+        "status": txn["status"],
+        "createdAt": txn["createdAt"].isoformat() if txn["createdAt"] else None,
+    }
+
+
+def _parse_invoice_items(raw_json):
+    """Same 'drop, don't patch' rule as _parse_transaction_items, plus a unit price. A line
+    is DROPPED when it has no description, no positive quantity, or no non-negative unit
+    price - which also drops it from the linked Stock Out, since both are built from this
+    one list, so the two documents can never disagree.
+
+    Deliberately NOT restricted to the selected customer's price list (unlike
+    _parse_items' valid_catalogs for Purchase Orders) - legacy invoice data shows lines
+    routinely billed off-catalog, so the full inventory picker stays open here; a
+    customer's price is only ever a suggestion (see invoice_customer_prices), never
+    enforced. amount = enteredQuantity * unitPrice - the ENTERED quantity, not the
+    base-unit-converted `quantity`, so a box price stays a box price and never gets
+    divided by packSize.
+    """
+    try:
+        parsed = json.loads(raw_json or "[]")
+    except ValueError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+
+    pack_sizes = {i["id"]: i["packSize"] for i in inventory_items_repo.list_all_items()}
+
+    items = []
+    for entry in parsed[:MAX_INVOICE_ITEMS]:
+        if not isinstance(entry, dict):
+            continue
+        description = _clip((entry.get("description") or "").strip())
+        raw_quantity = _parse_coordinate(str(entry.get("quantity", "")))
+        unit_price = _parse_coordinate(str(entry.get("unitPrice", "")))
+        item_id_raw = str(entry.get("itemId", "")).strip()
+        item_id = int(item_id_raw) if item_id_raw.isdigit() else None
+        if not description or raw_quantity is None or raw_quantity <= 0:
+            continue
+        if unit_price is None or unit_price < 0:
+            continue
+
+        unit_mode = "pack" if entry.get("unitMode") == "pack" else "base"
+        pack_size = pack_sizes.get(item_id) if item_id is not None else None
+        if unit_mode == "pack":
+            if not pack_size or pack_size <= 0:
+                continue
+            entered_quantity = int(raw_quantity)
+            entered_pack_size = int(pack_size)
+            stored_quantity = entered_quantity * entered_pack_size
+        else:
+            entered_quantity = int(raw_quantity)
+            entered_pack_size = None
+            stored_quantity = entered_quantity
+
+        unit_price = Decimal(str(unit_price))
+        amount = (Decimal(entered_quantity) * unit_price).quantize(Decimal("0.01"))
+
+        items.append(
+            {
+                "itemId": item_id,
+                "catalogCode": _clip((entry.get("catalogCode") or "").strip()) or None,
+                "description": description,
+                "unit": _clip((entry.get("unit") or "").strip(), limit=30) or None,
+                "category": _clip((entry.get("category") or "").strip(), limit=50) or None,
+                "quantity": stored_quantity,
+                "enteredQuantity": entered_quantity,
+                "enteredPackSize": entered_pack_size,
+                "lot": _clip((entry.get("lot") or "").strip(), limit=50) or None,
+                "expiryDate": (entry.get("expiryDate") or "").strip() or None,
+                "unitPrice": unit_price,
+                "amount": amount,
+            }
+        )
+    return items
+
+
+def _parse_invoice_form():
+    """Resolves the customer and snapshots soldTo/address/tin from the FORM (not re-read
+    from tbl_customers at save time) so an invoice freezes what it said - same reasoning as
+    create_purchase_order's supplier snapshot. Money is always derived from items, never
+    trusted from the client - VAT-INCLUSIVE (see invoices_repo's module docstring for why
+    this is the opposite of the Purchase Order convention)."""
+    customer_id = request.form.get("customerId", "").strip()
+    customer = customers_repo.get_customer(int(customer_id)) if customer_id.isdigit() else None
+
+    items = _parse_invoice_items(request.form.get("itemsJson"))
+
+    if items:
+        total_amount = sum((i["amount"] for i in items), Decimal("0.00"))
+        vatable_amount = (total_amount / Decimal("1.12")).quantize(Decimal("0.01"))
+        vat_amount = total_amount - vatable_amount
+    else:
+        vatable_amount = vat_amount = total_amount = None
+
+    return {
+        "customerId": customer["id"] if customer else None,
+        "customerCode": customer["code"] if customer else None,
+        "soldTo": _clip(request.form.get("soldTo", "").strip()) or None,
+        "address": _clip(request.form.get("address", "").strip()) or None,
+        "tin": _clip(request.form.get("tin", "").strip(), limit=30) or None,
+        "customerPo": _clip(request.form.get("customerPo", "").strip(), limit=100) or None,
+        "paymentTerms": _clip(request.form.get("paymentTerms", "").strip(), limit=100) or None,
+        "paymentDueDate": request.form.get("paymentDueDate", "").strip() or None,
+        "salesPerson": _clip(request.form.get("salesPerson", "").strip(), limit=100) or None,
+        "invoiceDate": request.form.get("invoiceDate", "").strip() or None,
+        "vatableAmount": vatable_amount,
+        "vatAmount": vat_amount,
+        "totalAmount": total_amount,
+        "invoiceType": _clip(request.form.get("invoiceType", "").strip(), limit=30) or None,
+        "noaNumber": _clip(request.form.get("noaNumber", "").strip(), limit=30) or None,
+        "notes": _clip(request.form.get("notes", "").strip()) or None,
+        "branch": _clip(request.form.get("branch", "").strip(), limit=100) or None,
+        "createStockOut": request.form.get("createStockOut") == "on",
+        "items": items,
+    }
+
+
+@main_bp.route("/page/invoice_invoices")
+@login_required
+def invoices():
+    """The Invoices list: server-paginated, same shape as warehouse_transactions() /
+    purchase_order_orders() - this is a transactional queue of documents, not master data."""
+    search = request.args.get("q", "").strip()
+    status = request.args.get("status", "").strip()
+    branch = request.args.get("branch", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    total = invoices_repo.count_invoices(search or None, status or None, branch or None)
+    page_count = max(1, -(-total // INVOICE_PER_PAGE))  # ceil
+    page = min(page, page_count)
+
+    records = invoices_repo.list_invoices(
+        search=search or None,
+        status=status or None,
+        branch=branch or None,
+        limit=INVOICE_PER_PAGE,
+        offset=(page - 1) * INVOICE_PER_PAGE,
+    )
+    invoice_ids = [r["id"] for r in records]
+    items_by_invoice = {
+        invoice_id: [_invoice_item_for_view(i) for i in items]
+        for invoice_id, items in invoices_repo.list_items_for_invoices(invoice_ids).items()
+    }
+    txns_by_invoice = {
+        invoice_id: [_invoice_txn_for_view(t) for t in txns]
+        for invoice_id, txns in warehouse_transactions_repo.list_transactions_for_invoices(invoice_ids).items()
+    }
+    return render_template(
+        "invoices.html",
+        invoices=records,
+        items_by_invoice=items_by_invoice,
+        txns_by_invoice=txns_by_invoice,
+        customers=customers_repo.list_active_customers(),
+        inventory_items=purchase_orders_repo.list_active_inventory_items(),
+        search=search,
+        status=status,
+        branch=branch,
+        page=page,
+        page_count=page_count,
+        total=total,
+        per_page=INVOICE_PER_PAGE,
+    )
+
+
+@main_bp.route("/page/invoice_invoices/customer-prices")
+@login_required
+def invoice_customer_prices():
+    """Feeds the Add Invoice form's line-item picker with a price suggestion per catalog
+    item when the selected customer has one on file. Not a restriction like Purchase
+    Orders' supplier-scoped picker (see _parse_invoice_items) - just a suggestion."""
+    customer_id = request.args.get("customerId", "").strip()
+    if not customer_id.isdigit():
+        return jsonify([])
+    products = customers_repo.list_products_for_customer(int(customer_id))
+    return jsonify(
+        [
+            {
+                "catalog": p["catalog"],
+                "unit": p["unit"],
+                "priceCode": p["priceCode"],
+                "price": float(p["price"]) if p["price"] is not None else None,
+            }
+            for p in products
+        ]
+    )
+
+
+@main_bp.route("/page/invoice_invoices/add", methods=["POST"])
+@login_required
+def invoice_add():
+    data = _parse_invoice_form()
+    if not data["items"]:
+        flash("Add at least one line item — every item needs a description, quantity, and unit price.", "error")
+        return redirect(url_for("main.invoices"))
+
+    try:
+        invoice_id, invoice_number, transaction_id = invoices_repo.create_invoice(
+            data, created_by=session.get("user_id")
+        )
+    except (IntegrityError, DataError):
+        flash("Could not submit — one of the selected records no longer exists, or a value was too long to save.", "error")
+        return redirect(url_for("main.invoices"))
+
+    message = f"Invoice {invoice_number} created."
+    if transaction_id:
+        message += f" Linked Stock Out #{transaction_id:06d} recorded."
+    flash(message, "success")
+    return redirect(url_for("main.invoices"))
+
+
+@main_bp.route("/page/invoice_invoices/<int:invoice_id>/edit", methods=["POST"])
+@login_required
+def invoice_edit(invoice_id):
+    invoice = invoices_repo.get_invoice(invoice_id)
+    if not invoice:
+        abort(404)
+    # Edit is only offered while the invoice itself is still Created AND no linked
+    # transaction has moved past Created/Verified - once one is Finished, the goods have
+    # actually left the warehouse against these exact items, so rewriting them here would
+    # misrepresent a physical event that already happened (same reasoning
+    # warehouse_transaction_edit already applies to a Finished transaction directly).
+    linked_txns = warehouse_transactions_repo.list_transactions_for_invoices([invoice_id]).get(invoice_id, [])
+    txn_locked = any(t["status"] in ("Finished", "Void") for t in linked_txns)
+    if invoice["createdBy"] != session.get("user_id") or invoice["status"] != "Created" or txn_locked:
+        abort(403)
+
+    data = _parse_invoice_form()
+    if not data["items"]:
+        flash("Add at least one line item — every item needs a description, quantity, and unit price.", "error")
+        return redirect(url_for("main.invoices"))
+
+    try:
+        invoices_repo.update_invoice(invoice_id, data, updated_by=session.get("user_id"))
+    except (IntegrityError, DataError):
+        flash("Could not save — one of the selected records no longer exists, or a value was too long to save.", "error")
+        return redirect(url_for("main.invoices"))
+
+    flash(f"Invoice {invoice['invoiceNumber']} updated.", "success")
+    return redirect(url_for("main.invoices"))
+
+
+@main_bp.route("/page/invoice_invoices/<int:invoice_id>/print", methods=["POST"])
+@login_required
+def invoice_print(invoice_id):
+    invoice = invoices_repo.get_invoice(invoice_id)
+    if not invoice:
+        abort(404)
+    # No creator restriction - printing is a mechanical act, not a second-person control,
+    # unlike Warehouse Transactions' Verify (which blocks the creator on purpose).
+    if invoice["status"] != "Created":
+        abort(403)
+    invoices_repo.mark_printed(invoice_id, printed_by=session.get("user_id"))
+    flash("Invoice marked as printed.", "success")
+    return redirect(url_for("main.invoices"))
+
+
+@main_bp.route("/page/invoice_invoices/<int:invoice_id>/deliver", methods=["POST"])
+@login_required
+def invoice_deliver(invoice_id):
+    invoice = invoices_repo.get_invoice(invoice_id)
+    if not invoice:
+        abort(404)
+    if invoice["status"] != "Printed":
+        abort(403)
+    invoices_repo.mark_delivered(invoice_id, delivered_by=session.get("user_id"))
+    flash("Invoice marked as delivered.", "success")
+    return redirect(url_for("main.invoices"))
+
+
+@main_bp.route("/page/invoice_invoices/<int:invoice_id>/pay", methods=["POST"])
+@login_required
+def invoice_pay(invoice_id):
+    invoice = invoices_repo.get_invoice(invoice_id)
+    if not invoice:
+        abort(404)
+    # A creator can't mark their own invoice Paid - this is where the segregation-of-duties
+    # check migrates to for a billing document, in place of Warehouse Transactions' Verify
+    # (which blocks the creator from confirming their own stock movement instead). Money,
+    # not paper, is the thing worth a second pair of eyes here.
+    if invoice["status"] != "Delivered" or invoice["createdBy"] == session.get("user_id"):
+        abort(403)
+    invoices_repo.mark_paid(invoice_id, paid_by=session.get("user_id"))
+    flash("Invoice marked as paid.", "success")
+    return redirect(url_for("main.invoices"))
+
+
+@main_bp.route("/page/invoice_invoices/<int:invoice_id>/void", methods=["POST"])
+@login_required
+def invoice_void(invoice_id):
+    invoice = invoices_repo.get_invoice(invoice_id)
+    if not invoice:
+        abort(404)
+    # Blocked once Paid - money has already changed hands by then, and reversing that
+    # needs a credit memo, not a void (the legacy data's one "-CM" invoice is evidence the
+    # business already has that as a separate concept). Void is otherwise open at any
+    # other status, same as Warehouse Transactions' Void.
+    if invoice["createdBy"] != session.get("user_id") or invoice["status"] in ("Void", "Paid"):
+        abort(403)
+    reason = request.form.get("reason", "").strip()[:255] or None
+    invoices_repo.void_invoice(invoice_id, voided_by=session.get("user_id"), reason=reason)
+    flash("Invoice voided.", "success")
+    return redirect(url_for("main.invoices"))
 
 
 @main_bp.route("/page/<slug>")

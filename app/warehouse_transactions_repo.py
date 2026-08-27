@@ -83,6 +83,106 @@ def get_transaction(txn_id):
         conn.close()
 
 
+def insert_transaction(cur, data, created_by):
+    """The header + line-item INSERTs, on a cursor the CALLER owns and will commit.
+
+    Extracted from create_transaction so invoices_repo.create_invoice() can land an
+    invoice, its items, and this transaction in ONE transaction on ONE connection - a
+    linked Stock Out must not survive an invoice that rolled back, and its invoiceId FK
+    can't resolve against an invoice that hasn't committed yet on a different connection.
+    data["items"] may be a superset of what's read here (invoices_repo's item dicts also
+    carry unitPrice/amount) - only the keys below are used.
+    """
+    cur.execute(
+        """
+        INSERT INTO tbl_warehouse_transactions
+            (direction, reason, careTo, note, status,
+             purchaseOrderId, poNumber, invoiceId, siNumber, customerPo, supplierInvoice,
+             drNumber, supplierDrNumber, branch,
+             isDeleted, createdBy, createdAt, updatedBy, updatedAt)
+        VALUES
+            (%s, %s, %s, %s, 'Created',
+             %s, %s, %s, %s, %s, %s,
+             %s, %s, %s,
+             0, %s, NOW(), %s, NOW())
+        """,
+        (
+            data["direction"],
+            data["reason"],
+            data["careTo"],
+            data["note"],
+            data["purchaseOrderId"],
+            data["poNumber"],
+            data["invoiceId"],
+            data["siNumber"],
+            data["customerPo"],
+            data["supplierInvoice"],
+            data["drNumber"],
+            data["supplierDrNumber"],
+            data["branch"],
+            created_by,
+            created_by,
+        ),
+    )
+    transaction_id = cur.lastrowid
+
+    for seq, item in enumerate(data["items"], start=1):
+        cur.execute(
+            """
+            INSERT INTO tbl_warehouse_transaction_items
+                (transactionId, sequence, itemId, catalogCode, description, unit,
+                 category, quantity, enteredQuantity, enteredPackSize, lot, expiryDate)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                transaction_id,
+                seq,
+                item["itemId"],
+                item["catalogCode"],
+                item["description"],
+                item["unit"],
+                item["category"],
+                item["quantity"],
+                item["enteredQuantity"],
+                item["enteredPackSize"],
+                item["lot"],
+                item["expiryDate"],
+            ),
+        )
+
+    return transaction_id
+
+
+def replace_transaction_items(cur, txn_id, items):
+    """Delete-then-reinsert a transaction's line items, on the caller's cursor. Extracted
+    from update_transaction for the same reason as insert_transaction - invoices_repo needs
+    to rewrite a linked transaction's items in the same commit as the invoice's own."""
+    cur.execute("DELETE FROM tbl_warehouse_transaction_items WHERE transactionId = %s", (txn_id,))
+    for seq, item in enumerate(items, start=1):
+        cur.execute(
+            """
+            INSERT INTO tbl_warehouse_transaction_items
+                (transactionId, sequence, itemId, catalogCode, description, unit,
+                 category, quantity, enteredQuantity, enteredPackSize, lot, expiryDate)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                txn_id,
+                seq,
+                item["itemId"],
+                item["catalogCode"],
+                item["description"],
+                item["unit"],
+                item["category"],
+                item["quantity"],
+                item["enteredQuantity"],
+                item["enteredPackSize"],
+                item["lot"],
+                item["expiryDate"],
+            ),
+        )
+
+
 def create_transaction(data, created_by):
     """Insert the transaction header and its line items in one transaction.
 
@@ -90,67 +190,14 @@ def create_transaction(data, created_by):
     codebase's fourth), for a related but distinct reason: there's no money on this table
     to drift, but a transaction with zero surviving line items would be a meaningless "0
     items moved" record, so the header and its items must land together or not at all.
+    Owns the connection; delegates the SQL to insert_transaction so invoices_repo can reuse
+    it on a connection IT owns instead.
     """
     conn = get_connection()
     try:
         conn.begin()
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO tbl_warehouse_transactions
-                    (direction, reason, careTo, note, status,
-                     purchaseOrderId, poNumber, siNumber, customerPo, supplierInvoice,
-                     drNumber, supplierDrNumber, branch,
-                     isDeleted, createdBy, createdAt, updatedBy, updatedAt)
-                VALUES
-                    (%s, %s, %s, %s, 'Created',
-                     %s, %s, %s, %s, %s,
-                     %s, %s, %s,
-                     0, %s, NOW(), %s, NOW())
-                """,
-                (
-                    data["direction"],
-                    data["reason"],
-                    data["careTo"],
-                    data["note"],
-                    data["purchaseOrderId"],
-                    data["poNumber"],
-                    data["siNumber"],
-                    data["customerPo"],
-                    data["supplierInvoice"],
-                    data["drNumber"],
-                    data["supplierDrNumber"],
-                    data["branch"],
-                    created_by,
-                    created_by,
-                ),
-            )
-            transaction_id = cur.lastrowid
-
-            for seq, item in enumerate(data["items"], start=1):
-                cur.execute(
-                    """
-                    INSERT INTO tbl_warehouse_transaction_items
-                        (transactionId, sequence, itemId, catalogCode, description, unit,
-                         category, quantity, enteredQuantity, enteredPackSize, lot, expiryDate)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        transaction_id,
-                        seq,
-                        item["itemId"],
-                        item["catalogCode"],
-                        item["description"],
-                        item["unit"],
-                        item["category"],
-                        item["quantity"],
-                        item["enteredQuantity"],
-                        item["enteredPackSize"],
-                        item["lot"],
-                        item["expiryDate"],
-                    ),
-                )
-
+            transaction_id = insert_transaction(cur, data, created_by)
         conn.commit()
         return transaction_id
     except Exception:
@@ -169,6 +216,11 @@ def update_transaction(txn_id, data, updated_by):
     fully replaced (delete-then-reinsert) rather than diffed, matching how the Add form
     always submits a complete list rather than incremental changes - same reasoning as
     create_transaction's all-or-nothing insert.
+
+    invoiceId is deliberately NOT in this UPDATE's SET list - the link is set once at
+    creation, not a form field, and the Warehouse Transactions edit form never posts it.
+    Including it here would silently null the link the first time someone edits an
+    invoice-linked transaction from this page.
     """
     conn = get_connection()
     try:
@@ -201,31 +253,7 @@ def update_transaction(txn_id, data, updated_by):
                 ),
             )
 
-            cur.execute("DELETE FROM tbl_warehouse_transaction_items WHERE transactionId = %s", (txn_id,))
-
-            for seq, item in enumerate(data["items"], start=1):
-                cur.execute(
-                    """
-                    INSERT INTO tbl_warehouse_transaction_items
-                        (transactionId, sequence, itemId, catalogCode, description, unit,
-                         category, quantity, enteredQuantity, enteredPackSize, lot, expiryDate)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        txn_id,
-                        seq,
-                        item["itemId"],
-                        item["catalogCode"],
-                        item["description"],
-                        item["unit"],
-                        item["category"],
-                        item["quantity"],
-                        item["enteredQuantity"],
-                        item["enteredPackSize"],
-                        item["lot"],
-                        item["expiryDate"],
-                    ),
-                )
+            replace_transaction_items(cur, txn_id, data["items"])
 
         conn.commit()
     except Exception:
@@ -294,6 +322,52 @@ def get_items_for_transaction(txn_id):
     return list_items_for_transactions([txn_id]).get(int(txn_id), [])
 
 
+def list_transactions_for_invoices(invoice_ids):
+    """Every warehouse transaction linked to a page of invoices, keyed by invoiceId. Many
+    transactions -> one invoice (a handful of legacy invoices have up to 7), which is why
+    the link lives as invoiceId on this table rather than as a column on tbl_invoices."""
+    invoice_ids = [int(i) for i in invoice_ids]  # coerce BEFORE interpolating placeholders
+    if not invoice_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(invoice_ids))
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, invoiceId, direction, status, createdAt
+                FROM tbl_warehouse_transactions
+                WHERE invoiceId IN ({placeholders}) AND isDeleted = 0
+                ORDER BY id ASC
+                """,
+                invoice_ids,
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    txns_by_invoice = {}
+    for row in rows:
+        txns_by_invoice.setdefault(row["invoiceId"], []).append(row)
+    return txns_by_invoice
+
+
+def mark_void(cur, txn_id, voided_by, reason):
+    """The Void UPDATE, on a cursor the caller owns/commits - extracted so
+    invoices_repo.void_invoice() can void every transaction linked to an invoice in the
+    same commit as the invoice itself. See void() for why Void has no status restriction."""
+    cur.execute(
+        """
+        UPDATE tbl_warehouse_transactions
+        SET status = 'Void', voidedBy = %s, voidedAt = NOW(), voidReason = %s,
+            updatedBy = %s, updatedAt = NOW()
+        WHERE id = %s
+        """,
+        (voided_by, reason, voided_by, txn_id),
+    )
+
+
 def void(txn_id, voided_by, reason):
     """Mark a transaction Void - the only way to cancel one. There is deliberately no
     delete for this module: a stock movement record needs to stay in the ledger for audit
@@ -307,15 +381,7 @@ def void(txn_id, voided_by, reason):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_warehouse_transactions
-                SET status = 'Void', voidedBy = %s, voidedAt = NOW(), voidReason = %s,
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (voided_by, reason, voided_by, txn_id),
-            )
+            mark_void(cur, txn_id, voided_by, reason)
     finally:
         conn.close()
 

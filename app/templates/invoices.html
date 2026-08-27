@@ -1,0 +1,1180 @@
+{% extends "base.html" %}
+
+{% block title %}Invoices - Office System{% endblock %}
+
+{% block content %}
+{% set STATUS_TONE = {
+    'Created': 'badge-slate',
+    'Printed': 'badge-brand',
+    'Delivered': 'badge-warning',
+    'Paid': 'badge-success',
+    'Void': 'badge-accent',
+    'Finished': 'badge-slate',
+    'Returned': 'badge-slate'
+} %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="file-text" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Invoices</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    Bill customers and track each invoice through Print, Deliver, and Paid.
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Add Invoice
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="file-text" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Invoices
+            </h2>
+            <div class="flex items-center gap-2">
+                <form method="GET" action="{{ url_for('main.invoices') }}" class="relative" id="searchForm">
+                    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                    {% if branch %}<input type="hidden" name="branch" value="{{ branch }}">{% endif %}
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" id="invoiceSearch" value="{{ search }}"
+                           placeholder="Search invoice #, customer, reference…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </form>
+                <span class="badge badge-slate whitespace-nowrap">{{ '{:,}'.format(total) }} shown</span>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+            {% for value, label in [('', 'All'), ('Created', 'Created'), ('Printed', 'Printed'), ('Delivered', 'Delivered'), ('Paid', 'Paid'), ('Void', 'Void')] %}
+            <a href="{{ url_for('main.invoices', q=search or None, status=value or None, branch=branch or None) }}"
+               class="badge {{ 'bg-accent-600 text-white ring-0' if status == value else 'badge-slate' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+            <span class="mx-1 h-4 w-px bg-slate-200 dark:bg-slate-700"></span>
+            {% for value, label in [('', 'All Branches'), ('Calamba', 'Calamba'), ('Bicol', 'Bicol')] %}
+            <a href="{{ url_for('main.invoices', q=search or None, status=status or None, branch=value or None) }}"
+               class="badge {{ 'bg-accent-600 text-white ring-0' if branch == value else 'badge-slate' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[64rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th w-28">Invoice #</th>
+                        <th class="table-th w-24">Date</th>
+                        <th class="table-th">Sold To</th>
+                        <th class="table-th">Reference</th>
+                        <th class="table-th w-32 text-right">Total</th>
+                        <th class="table-th w-28">Status</th>
+                        <th class="table-th w-40 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for inv in invoices %}
+                    <tr class="table-row"
+                        data-id="{{ inv.id }}"
+                        data-invoice-number="{{ inv.invoiceNumber }}"
+                        data-invoice-date="{{ inv.invoiceDate or '' }}"
+                        data-customer-id="{{ inv.customerId or '' }}"
+                        data-sold-to="{{ inv.soldTo or '' }}"
+                        data-address="{{ inv.address or '' }}"
+                        data-tin="{{ inv.tin or '' }}"
+                        data-customer-po="{{ inv.customerPo or '' }}"
+                        data-payment-terms="{{ inv.paymentTerms or '' }}"
+                        data-payment-due-date="{{ inv.paymentDueDate or '' }}"
+                        data-sales-person="{{ inv.salesPerson or '' }}"
+                        data-vatable-amount="{{ inv.vatableAmount if inv.vatableAmount is not none else '' }}"
+                        data-vat-amount="{{ inv.vatAmount if inv.vatAmount is not none else '' }}"
+                        data-total-amount="{{ inv.totalAmount if inv.totalAmount is not none else '' }}"
+                        data-status="{{ inv.status }}"
+                        data-invoice-type="{{ inv.invoiceType or '' }}"
+                        data-noa-number="{{ inv.noaNumber or '' }}"
+                        data-notes="{{ inv.notes or '' }}"
+                        data-branch="{{ inv.branch or '' }}"
+                        data-created-by-name="{{ inv.createdByName or '' }}"
+                        data-printed-by-name="{{ inv.printedByName or '' }}"
+                        data-delivered-by-name="{{ inv.deliveredByName or '' }}"
+                        data-paid-by-name="{{ inv.paidByName or '' }}"
+                        data-voided-by-name="{{ inv.voidedByName or '' }}"
+                        data-void-reason="{{ inv.voidReason or '' }}"
+                        {# single-quoted: Flask's tojson escapes < > & ' but NOT ", and JSON
+                           is full of " - double quotes here would end the attribute early
+                           and corrupt the row's markup #}
+                        data-items='{{ items_by_invoice.get(inv.id, [])|tojson }}'
+                        data-txns='{{ txns_by_invoice.get(inv.id, [])|tojson }}'>
+                        <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">{{ inv.invoiceNumber }}</td>
+                        <td class="table-td text-sm">{{ inv.invoiceDate.strftime('%b %d, %Y') if inv.invoiceDate else '—' }}</td>
+                        <td class="table-td truncate text-sm">{{ inv.soldTo or '—' }}</td>
+                        <td class="table-td truncate text-sm">
+                            {% if inv.customerPo %}PO {{ inv.customerPo }}
+                            {% elif inv.noaNumber %}NOA {{ inv.noaNumber }}
+                            {% else %}—{% endif %}
+                        </td>
+                        <td class="table-td text-right text-sm">{{ '₱{:,.2f}'.format(inv.totalAmount) if inv.totalAmount is not none else '—' }}</td>
+                        <td class="table-td">
+                            <span class="badge {{ STATUS_TONE.get(inv.status, 'badge-slate') }}">{{ inv.status }}</span>
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-view" title="View" aria-label="View Invoice">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                                {% if inv.status == 'Created' %}
+                                <button type="button" class="btn btn-icon btn-ghost js-print"
+                                        data-url="{{ url_for('main.invoice_print', invoice_id=inv.id) }}" title="Print">
+                                    <i data-lucide="printer" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if inv.status == 'Printed' %}
+                                <button type="button" class="btn btn-icon text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 js-deliver"
+                                        data-url="{{ url_for('main.invoice_deliver', invoice_id=inv.id) }}" title="Deliver">
+                                    <i data-lucide="truck" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if inv.status == 'Delivered' and session.get('user_id') != inv.createdBy %}
+                                <button type="button" class="btn btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 js-pay"
+                                        data-url="{{ url_for('main.invoice_pay', invoice_id=inv.id) }}" title="Mark Paid">
+                                    <i data-lucide="hand-coins" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if inv.status == 'Created' and session.get('user_id') == inv.createdBy %}
+                                <button type="button" class="btn btn-icon btn-ghost js-edit" title="Edit" aria-label="Edit Invoice">
+                                    <i data-lucide="pencil" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if inv.status not in ('Void', 'Paid') and session.get('user_id') == inv.createdBy %}
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-void"
+                                        title="Void" aria-label="Void Invoice">
+                                    <i data-lucide="ban" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="file-text" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No invoices match your filters</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if page_count > 1 %}
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3
+                    dark:border-slate-800">
+            <p class="text-sm text-slate-500 dark:text-slate-400">
+                Showing <span class="font-medium text-slate-700 dark:text-slate-200">{{ ((page - 1) * per_page) + 1 }}</span>–<span
+                    class="font-medium text-slate-700 dark:text-slate-200">{{ [page * per_page, total]|min }}</span>
+                of <span class="font-medium text-slate-700 dark:text-slate-200">{{ '{:,}'.format(total) }}</span>
+            </p>
+
+            {% macro page_url(p) -%}
+                {{ url_for('main.invoices', page=p, q=search or None, status=status or None, branch=branch or None) }}
+            {%- endmacro %}
+
+            <nav class="flex items-center gap-1" aria-label="Pagination">
+                {% if page > 1 %}
+                    <a href="{{ page_url(page - 1) }}" class="btn btn-secondary btn-sm" aria-label="Previous page">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </span>
+                {% endif %}
+
+                {% set win_start = [1, page - 2]|max %}
+                {% set win_end = [page_count, win_start + 4]|min %}
+                {% set win_start = [1, win_end - 4]|max %}
+
+                {% if win_start > 1 %}
+                    <a href="{{ page_url(1) }}" class="btn btn-secondary btn-sm">1</a>
+                    {% if win_start > 2 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                {% endif %}
+
+                {% for p in range(win_start, win_end + 1) %}
+                    {% if p == page %}
+                        <span class="btn btn-sm bg-accent-600 text-white shadow-sm">{{ p }}</span>
+                    {% else %}
+                        <a href="{{ page_url(p) }}" class="btn btn-secondary btn-sm">{{ p }}</a>
+                    {% endif %}
+                {% endfor %}
+
+                {% if win_end < page_count %}
+                    {% if win_end < page_count - 1 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                    <a href="{{ page_url(page_count) }}" class="btn btn-secondary btn-sm">{{ page_count }}</a>
+                {% endif %}
+
+                {% if page < page_count %}
+                    <a href="{{ page_url(page + 1) }}" class="btn btn-secondary btn-sm" aria-label="Next page">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </span>
+                {% endif %}
+            </nav>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ===================== Add Invoice modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-3xl">
+        <form id="recordForm" method="POST" action="{{ url_for('main.invoice_add') }}">
+            <div class="modal-header">
+                <h3 class="modal-title" id="recordModalTitle">Add Invoice</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-5">
+
+                <div class="relative" data-dropdown>
+                    <label class="label" for="customerSearchInput">Customer <span class="text-accent-600">*</span></label>
+                    <input type="text" class="input" id="customerSearchInput" placeholder="Search customer code or name…" autocomplete="off">
+                    <input type="hidden" id="fieldCustomerId" name="customerId">
+                    <div data-dropdown-panel id="customerOptions"
+                         class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div class="sm:col-span-2">
+                        <label class="label" for="fieldSoldTo">Sold To</label>
+                        <input type="text" class="input" id="fieldSoldTo" name="soldTo">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldTin">TIN</label>
+                        <input type="text" class="input" id="fieldTin" name="tin">
+                    </div>
+                </div>
+                <div>
+                    <label class="label" for="fieldAddress">Address</label>
+                    <input type="text" class="input" id="fieldAddress" name="address">
+                </div>
+
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                        <label class="label" for="fieldInvoiceDate">Invoice Date</label>
+                        <input type="date" class="input" id="fieldInvoiceDate" name="invoiceDate">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldBranch">Branch</label>
+                        <input type="text" class="input" id="fieldBranch" name="branch" placeholder="e.g. Calamba">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldPaymentTerms">Payment Terms</label>
+                        <input type="text" class="input" id="fieldPaymentTerms" name="paymentTerms" placeholder="e.g. 30 days">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldPaymentDueDate">Payment Due Date</label>
+                        <input type="date" class="input" id="fieldPaymentDueDate" name="paymentDueDate">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldCustomerPo">Customer PO #</label>
+                        <input type="text" class="input" id="fieldCustomerPo" name="customerPo">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldNoaNumber">NOA #</label>
+                        <input type="text" class="input" id="fieldNoaNumber" name="noaNumber">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldSalesPerson">Sales Person</label>
+                        <input type="text" class="input" id="fieldSalesPerson" name="salesPerson">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldInvoiceType">Invoice Type</label>
+                        <select class="input" id="fieldInvoiceType" name="invoiceType">
+                            <option value="Regular">Regular</option>
+                            <option value="Invoice Only">Invoice Only</option>
+                        </select>
+                    </div>
+                </div>
+
+                <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                    <input type="checkbox" class="checkbox" id="fieldCreateStockOut" name="createStockOut" checked>
+                    Create a linked Warehouse Stock Out for these items
+                </label>
+                <p class="help -mt-3" id="stockOutHelp">
+                    Unchecked automatically for "Invoice Only" (billing for goods already delivered) - still your call either way.
+                </p>
+
+                <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
+                    <label class="label">Line Items <span class="text-accent-600">*</span></label>
+                    <p class="help mb-3">
+                        Search the item catalog to fill in description and unit. A price is suggested when the
+                        selected customer has one on file, but any item and price can be billed.
+                    </p>
+
+                    <div id="itemsList" class="space-y-3"></div>
+
+                    <button type="button" class="btn btn-secondary mt-3" id="addItemBtn">
+                        <i data-lucide="plus" class="h-4 w-4"></i>Add Line Item
+                    </button>
+
+                    <input type="hidden" id="fieldItemsJson" name="itemsJson">
+
+                    <div class="mt-4 space-y-1 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+                        <div class="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+                            <span>Vatable Sales</span>
+                            <span id="vatableDisplay">₱0.00</span>
+                        </div>
+                        <div class="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+                            <span>VAT (12%)</span>
+                            <span id="vatDisplay">₱0.00</span>
+                        </div>
+                        <div class="flex items-center justify-between border-t border-slate-200 pt-1 text-sm font-semibold
+                                    text-slate-900 dark:border-slate-700 dark:text-white">
+                            <span>Total Amount</span>
+                            <span id="grandTotalDisplay">₱0.00</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="label" for="fieldNotes">Notes</label>
+                    <textarea class="input" id="fieldNotes" name="notes" rows="2"></textarea>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary" id="recordSubmitBtn">
+                    <i data-lucide="send" class="h-4 w-4"></i>Record Invoice
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# One line-item row. Kept in a <template>, same reasoning as warehouse_transactions.html's
+   itemRowTemplate: markup lives with the rest of the HTML, and template.content is a
+   detached fragment so lucide.createIcons() doesn't scan it prematurely. #}
+<template id="itemRowTemplate">
+    <div class="js-item-row rounded-xl border border-slate-200 p-4 dark:border-slate-700" data-item="">
+        <div class="mb-3 flex items-center justify-between gap-2">
+            <span class="js-item-number grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-50
+                         text-xs font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"></span>
+            <button type="button" class="js-remove-item btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                    data-action="remove-item" aria-label="Remove this line item">
+                <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+        </div>
+
+        <div class="relative" data-dropdown>
+            <label class="label">Catalog / Description <span class="text-accent-600">*</span></label>
+            <input type="text" class="js-item-catalog-search input" autocomplete="off" placeholder="Search catalog # or item name, or type your own…">
+            <div class="js-item-catalog-panel hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg
+                        border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+        </div>
+
+        <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div>
+                <label class="label">Unit</label>
+                <input type="text" class="js-item-unit input">
+            </div>
+            <div>
+                <label class="label">Quantity <span class="text-accent-600">*</span></label>
+                <input type="number" class="js-item-quantity input" min="1" step="1">
+            </div>
+            <div>
+                <label class="label">Unit Price (₱) <span class="text-accent-600">*</span></label>
+                <input type="number" class="js-item-unit-price input" min="0" step="0.01">
+            </div>
+            <div>
+                <label class="label">Lot</label>
+                <input type="text" class="js-item-lot input">
+            </div>
+            <div>
+                <label class="label">Expiry Date</label>
+                <input type="date" class="js-item-expiry input">
+            </div>
+            <div>
+                <label class="label">Amount</label>
+                <input type="text" class="js-item-amount input cursor-not-allowed bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400" readonly tabindex="-1">
+            </div>
+        </div>
+
+        {# Only shown when the picked catalog item has a packSize on record - a plain
+           base-unit item never gets this, since there's nothing to convert by. #}
+        <div class="js-item-pack-toggle hidden mt-3 flex flex-wrap items-center gap-4 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
+            <span class="text-xs font-medium text-slate-500 dark:text-slate-400">Quantity is in:</span>
+            <label class="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+                <input type="radio" class="checkbox js-item-unit-mode" value="base" checked>
+                <span class="js-item-base-unit-label">Pieces</span>
+            </label>
+            <label class="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+                <input type="radio" class="checkbox js-item-unit-mode" value="pack">
+                <span class="js-item-pack-unit-label">Box</span>
+            </label>
+            <span class="js-item-converted-preview text-xs text-slate-500 dark:text-slate-400"></span>
+        </div>
+    </div>
+</template>
+
+<!-- ===================== View detail modal ===================== -->
+<div id="viewModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <h3 class="modal-title">Invoice Details</h3>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body space-y-3 text-sm">
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">Invoice #</p><p id="viewInvoiceNumber" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Status</p><p id="viewStatus" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Date</p><p id="viewInvoiceDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Branch</p><p id="viewBranch" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Sold To</p><p id="viewSoldTo" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">TIN</p><p id="viewTin" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Customer PO #</p><p id="viewCustomerPo" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">NOA #</p><p id="viewNoaNumber" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Sales Person</p><p id="viewSalesPerson" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Payment Terms</p><p id="viewPaymentTerms" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Payment Due</p><p id="viewPaymentDueDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Invoice Type</p><p id="viewInvoiceType" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div class="space-y-1 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+                <div class="flex items-center justify-between"><span class="help mb-0">Vatable Sales</span><span id="viewVatable" class="text-slate-700 dark:text-slate-300"></span></div>
+                <div class="flex items-center justify-between"><span class="help mb-0">VAT</span><span id="viewVat" class="text-slate-700 dark:text-slate-300"></span></div>
+                <div class="flex items-center justify-between border-t border-slate-200 pt-1 font-semibold text-slate-900 dark:border-slate-700 dark:text-white">
+                    <span>Total</span><span id="viewTotal"></span>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">Created By</p><p id="viewCreatedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Printed By</p><p id="viewPrintedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Delivered By</p><p id="viewDeliveredBy" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Paid By</p><p id="viewPaidBy" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div id="viewVoidWrap" class="hidden rounded-lg bg-rose-50 px-3 py-2 dark:bg-rose-500/10">
+                <p class="help mb-0.5">Voided By <span id="viewVoidedBy"></span></p>
+                <p id="viewVoidReason" class="text-slate-700 dark:text-slate-300"></p>
+            </div>
+            <div>
+                <p class="help mb-1">Line Items</p>
+                <div id="viewItems" class="space-y-2"></div>
+            </div>
+            <div id="viewTxnsWrap" class="hidden">
+                <p class="help mb-1">Linked Stock Out</p>
+                <div id="viewTxns" class="space-y-1"></div>
+                <p id="viewTxnsWarning" class="mt-1 hidden rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+                    Goods have not been confirmed as released from the warehouse yet.
+                </p>
+            </div>
+            <div id="viewNotesWrap" class="hidden"><p class="help mb-0.5">Notes</p><p id="viewNotes" class="text-slate-700 dark:text-slate-300"></p></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Void confirm modal ===================== -->
+<div id="voidConfirmModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="voidForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title">Void Invoice</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="px-5 py-5">
+                <div class="mb-4 flex items-start gap-3">
+                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+                        <i data-lucide="triangle-alert" class="h-5 w-5"></i>
+                    </span>
+                    <div>
+                        <p class="text-sm font-medium text-slate-900 dark:text-white">Void this invoice?</p>
+                        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                            Any linked Stock Out transaction will be voided too, returning its stock to on-hand.
+                            The invoice number stays in the series marked Void - this cannot be undone from here.
+                        </p>
+                    </div>
+                </div>
+                <label class="label" for="voidReason">Reason (optional)</label>
+                <textarea class="input" id="voidReason" name="reason" rows="2"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-danger">
+                    <i data-lucide="ban" class="h-4 w-4"></i>Void
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var CUSTOMERS = {{ customers|tojson }};
+        var INVENTORY_ITEMS = {{ inventory_items|tojson }};
+        var CUSTOMER_PRICES = {};
+
+        var recordForm = document.getElementById('recordForm');
+        var tbody = document.getElementById('recordsBody');
+
+        function escapeHtml(text) {
+            return String(text == null ? '' : text)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function peso(n) {
+            return '₱' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function formatDateDisplay(iso) {
+            if (!iso) return '';
+            var parts = iso.split('-');
+            if (parts.length !== 3) return iso;
+            var d = new Date(Date.UTC(+parts[0], +parts[1] - 1, +parts[2]));
+            return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+        }
+
+        /* ------------------------------------------------- searchable customer picker
+           Same [data-dropdown] contract as warehouse_transactions.html's initSearchablePicker. */
+        var searchablePanels = [];
+
+        function closeAllOtherDropdowns(exceptPanel) {
+            searchablePanels.forEach(function (p) {
+                if (p !== exceptPanel) p.classList.add('hidden');
+            });
+        }
+
+        function initSearchablePicker(inputId, hiddenId, panelId, items, getId, getLabel) {
+            var input = document.getElementById(inputId);
+            var hidden = document.getElementById(hiddenId);
+            var panel = document.getElementById(panelId);
+            searchablePanels.push(panel);
+
+            function render(filterText) {
+                var term = (filterText || '').trim().toLowerCase();
+                var matches = items.filter(function (item) {
+                    return !term || getLabel(item).toLowerCase().indexOf(term) !== -1;
+                });
+                panel.innerHTML = matches.length
+                    ? matches.map(function (item) {
+                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-id="'
+                            + getId(item) + '" data-name="' + getLabel(item).replace(/"/g, '&quot;') + '">' + getLabel(item) + '</button>';
+                    }).join('')
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matches</p>';
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-id]');
+                if (!btn) return;
+                input.value = btn.getAttribute('data-name');
+                hidden.value = btn.getAttribute('data-id');
+                hidden.dispatchEvent(new Event('change'));
+                panel.classList.add('hidden');
+            });
+
+            input.addEventListener('input', function () {
+                hidden.value = '';
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            input.addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeAllOtherDropdowns(panel);
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            return {
+                reset: function () {
+                    input.value = '';
+                    hidden.value = '';
+                    render('');
+                },
+            };
+        }
+
+        var customerPicker = initSearchablePicker(
+            'customerSearchInput', 'fieldCustomerId', 'customerOptions', CUSTOMERS,
+            function (c) { return c.id; }, function (c) { return c.code + ' — ' + (c.name || ''); }
+        );
+
+        var fieldCustomerId = document.getElementById('fieldCustomerId');
+        var fieldSoldTo = document.getElementById('fieldSoldTo');
+        var fieldAddress = document.getElementById('fieldAddress');
+        var fieldTin = document.getElementById('fieldTin');
+        var fieldPaymentTerms = document.getElementById('fieldPaymentTerms');
+        var fieldPaymentDueDate = document.getElementById('fieldPaymentDueDate');
+        var fieldInvoiceDate = document.getElementById('fieldInvoiceDate');
+
+        // Suggests into EMPTY fields only ("suggest, never lock" - same rule the supplier-
+        // invoice-number suggestion follows in Warehouse Transactions), and refreshes the
+        // per-catalog price map for the line-item picker below.
+        fieldCustomerId.addEventListener('change', function () {
+            var selectedId = fieldCustomerId.value;
+            CUSTOMER_PRICES = {};
+            var c = CUSTOMERS.find(function (x) { return String(x.id) === selectedId; });
+            if (!c) return;
+            if (!fieldSoldTo.value.trim()) fieldSoldTo.value = c.name || '';
+            if (!fieldAddress.value.trim()) fieldAddress.value = c.address || '';
+            if (!fieldTin.value.trim()) fieldTin.value = c.tin || '';
+            if (!fieldPaymentTerms.value.trim() && c.paymentTermDays != null) {
+                fieldPaymentTerms.value = c.paymentTermDays + ' days';
+            }
+            if (!fieldPaymentDueDate.value && c.paymentTermDays != null && fieldInvoiceDate.value) {
+                var d = new Date(fieldInvoiceDate.value + 'T00:00:00Z');
+                d.setUTCDate(d.getUTCDate() + parseInt(c.paymentTermDays, 10));
+                fieldPaymentDueDate.value = d.toISOString().slice(0, 10);
+            }
+            fetch('{{ url_for("main.invoice_customer_prices") }}?customerId=' + selectedId)
+                .then(function (r) { return r.json(); })
+                .then(function (rows) {
+                    var prices = {};
+                    rows.forEach(function (p) { prices[p.catalog] = p; });
+                    CUSTOMER_PRICES = prices;
+                })
+                .catch(function () { CUSTOMER_PRICES = {}; });
+        });
+
+        /* ------------------------------------------------- Invoice Type -> Stock Out default
+           Unconditional auto-creation would double-deduct stock for an "Invoice Only" bill
+           (goods already delivered earlier) - default the checkbox off for that type, but
+           leave it fully overridable either way. */
+        var fieldInvoiceType = document.getElementById('fieldInvoiceType');
+        var fieldCreateStockOut = document.getElementById('fieldCreateStockOut');
+        var stockOutUserTouched = false;
+        fieldCreateStockOut.addEventListener('change', function () { stockOutUserTouched = true; });
+        fieldInvoiceType.addEventListener('change', function () {
+            if (stockOutUserTouched) return;
+            fieldCreateStockOut.checked = fieldInvoiceType.value !== 'Invoice Only';
+        });
+
+        /* ------------------------------------------------- line items
+           Rows keyed by a minted uid, never array index - same reasoning as
+           warehouse_transactions.html's items. */
+        var items = [];
+        var itemUidCounter = 0;
+
+        var itemsList = document.getElementById('itemsList');
+        var itemRowTemplate = document.getElementById('itemRowTemplate');
+        var fieldItemsJson = document.getElementById('fieldItemsJson');
+        var vatableDisplay = document.getElementById('vatableDisplay');
+        var vatDisplay = document.getElementById('vatDisplay');
+        var grandTotalDisplay = document.getElementById('grandTotalDisplay');
+
+        function itemByUid(uid) {
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].uid === uid) return items[i];
+            }
+            return null;
+        }
+
+        function rowFor(uid) {
+            return itemsList.querySelector('.js-item-row[data-item="' + uid + '"]');
+        }
+
+        function makeItem() {
+            itemUidCounter += 1;
+            return {
+                uid: 'i' + itemUidCounter,
+                itemId: null, catalogCode: '', description: '', unit: '', category: '',
+                quantity: '', unitPrice: '', lot: '', expiryDate: '',
+                packSize: null, purchaseUnit: '', baseUnit: '', unitMode: 'base',
+            };
+        }
+
+        function updatePackPreview(row, item) {
+            var preview = row.querySelector('.js-item-converted-preview');
+            var qty = parseFloat(item.quantity);
+            if (item.unitMode === 'pack' && item.packSize && isFinite(qty) && qty > 0) {
+                preview.textContent = '= ' + (qty * item.packSize).toLocaleString() + ' ' + (item.baseUnit || 'pcs');
+            } else {
+                preview.textContent = '';
+            }
+        }
+
+        function updatePackToggle(row, item) {
+            var toggle = row.querySelector('.js-item-pack-toggle');
+            if (item.packSize && item.packSize > 0) {
+                toggle.classList.remove('hidden');
+                row.querySelector('.js-item-base-unit-label').textContent = item.baseUnit || 'Pieces';
+                row.querySelector('.js-item-pack-unit-label').textContent = item.purchaseUnit || 'Box';
+                row.querySelectorAll('.js-item-unit-mode').forEach(function (radio) {
+                    radio.checked = radio.value === item.unitMode;
+                });
+            } else {
+                toggle.classList.add('hidden');
+                item.unitMode = 'base';
+            }
+            updatePackPreview(row, item);
+        }
+
+        function initItemCatalogPicker(row, item) {
+            var input = row.querySelector('.js-item-catalog-search');
+            var panel = row.querySelector('.js-item-catalog-panel');
+            searchablePanels.push(panel);
+
+            function label(inv) { return inv.catalog + ' — ' + (inv.description || ''); }
+
+            function render(filterText) {
+                var term = (filterText || '').trim().toLowerCase();
+                var matches = !term ? [] : INVENTORY_ITEMS.filter(function (inv) {
+                    return inv.catalog.toLowerCase().indexOf(term) !== -1
+                        || (inv.description || '').toLowerCase().indexOf(term) !== -1;
+                }).slice(0, 30);
+                panel.innerHTML = matches.length
+                    ? matches.map(function (inv, idx) {
+                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-idx="' + idx + '">'
+                            + escapeHtml(label(inv)) + '</button>';
+                    }).join('')
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">Type to search, or just type a description below and use it as-is</p>';
+                panel._matches = matches;
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-idx]');
+                if (!btn || !panel._matches) return;
+                var inv = panel._matches[parseInt(btn.getAttribute('data-idx'), 10)];
+                if (!inv) return;
+                item.itemId = inv.id;
+                item.catalogCode = inv.catalog;
+                item.description = inv.description || '';
+                item.baseUnit = inv.baseUnit || inv.purchaseUnit || inv.salesUnit || '';
+                item.unit = item.baseUnit;
+                item.category = inv.category || '';
+                item.packSize = inv.packSize || null;
+                item.purchaseUnit = inv.purchaseUnit || '';
+                item.unitMode = 'base';
+                input.value = label(inv);
+                row.querySelector('.js-item-unit').value = item.unit;
+
+                // Suggest into an empty price field only.
+                var priced = CUSTOMER_PRICES[inv.catalog];
+                if (priced && priced.price != null && !item.unitPrice) {
+                    item.unitPrice = priced.price;
+                    row.querySelector('.js-item-unit-price').value = priced.price;
+                }
+
+                updatePackToggle(row, item);
+                panel.classList.add('hidden');
+                syncItems();
+            });
+
+            input.addEventListener('input', function () {
+                item.itemId = null;
+                item.catalogCode = '';
+                item.category = '';
+                item.description = input.value;
+                item.packSize = null;
+                item.purchaseUnit = '';
+                item.baseUnit = '';
+                item.unitMode = 'base';
+                updatePackToggle(row, item);
+                render(input.value);
+                panel.classList.remove('hidden');
+                syncItems();
+            });
+
+            input.addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeAllOtherDropdowns(panel);
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+        }
+
+        function appendItemRow(item) {
+            var frag = itemRowTemplate.content.cloneNode(true);
+            var row = frag.querySelector('.js-item-row');
+            row.setAttribute('data-item', item.uid);
+            frag.querySelectorAll('.js-item-unit-mode').forEach(function (radio) {
+                radio.name = 'unitMode-' + item.uid;
+            });
+            itemsList.appendChild(frag);
+            initItemCatalogPicker(rowFor(item.uid), item);
+            OS.refreshIcons();
+        }
+
+        function renumberItems() {
+            var rows = itemsList.querySelectorAll('.js-item-row');
+            rows.forEach(function (row, i) {
+                row.querySelector('.js-item-number').textContent = i + 1;
+                row.querySelector('.js-remove-item').classList.toggle('hidden', rows.length <= 1);
+            });
+        }
+
+        // Both serializes the payload AND recomputes the money display in one pass - same
+        // combined shape purchase_orders.html uses. VAT-INCLUSIVE: the line Amount already
+        // has VAT in it, so Vatable is backed out of the total rather than added on top
+        // (see invoices_repo's module docstring for why this is the opposite of the PO math).
+        function syncItems() {
+            var total = 0;
+            items.forEach(function (it) {
+                var q = parseFloat(it.quantity), p = parseFloat(it.unitPrice);
+                var amount = (isFinite(q) && q > 0 && isFinite(p) && p >= 0) ? q * p : 0;
+                var row = rowFor(it.uid);
+                if (row) row.querySelector('.js-item-amount').value = amount > 0 ? peso(amount) : '';
+                total += amount;
+            });
+            var vatable = total / 1.12, vat = total - vatable;
+            vatableDisplay.textContent = peso(vatable);
+            vatDisplay.textContent = peso(vat);
+            grandTotalDisplay.textContent = peso(total);
+
+            fieldItemsJson.value = JSON.stringify(items.map(function (it) {
+                return {
+                    itemId: it.itemId, catalogCode: it.catalogCode, description: it.description,
+                    unit: it.unit, category: it.category, quantity: it.quantity,
+                    unitPrice: it.unitPrice, lot: it.lot, expiryDate: it.expiryDate, unitMode: it.unitMode,
+                };
+            }));
+        }
+
+        function addItem() {
+            var item = makeItem();
+            items.push(item);
+            appendItemRow(item);
+            renumberItems();
+            syncItems();
+            return item;
+        }
+
+        function removeItem(uid) {
+            var row = rowFor(uid);
+            if (row) row.remove();
+            items = items.filter(function (it) { return it.uid !== uid; });
+            renumberItems();
+            syncItems();
+        }
+
+        function resetItems() {
+            items = [];
+            itemsList.innerHTML = '';
+            addItem();
+        }
+
+        // Rebuilds the whole list from an existing invoice's data-items JSON, for Edit.
+        function loadItems(list) {
+            items = [];
+            itemsList.innerHTML = '';
+            var source = (list && list.length) ? list : [null];
+            source.forEach(function (data) {
+                var item = makeItem();
+                if (data) {
+                    item.itemId = data.itemId || null;
+                    item.catalogCode = data.catalogCode || '';
+                    item.description = data.description || '';
+                    item.unit = data.unit || '';
+                    item.category = data.category || '';
+                    item.quantity = data.enteredQuantity != null ? String(data.enteredQuantity)
+                        : (data.quantity != null ? String(data.quantity) : '');
+                    item.unitPrice = data.unitPrice != null ? String(data.unitPrice) : '';
+                    item.unitMode = data.enteredPackSize ? 'pack' : 'base';
+                    item.lot = data.lot || '';
+                    item.expiryDate = data.expiryDate || '';
+
+                    var inv = item.itemId ? INVENTORY_ITEMS.find(function (i) { return i.id === item.itemId; }) : null;
+                    item.packSize = inv ? inv.packSize : null;
+                    item.purchaseUnit = inv ? inv.purchaseUnit : '';
+                    item.baseUnit = inv ? (inv.baseUnit || inv.purchaseUnit || inv.salesUnit || '') : '';
+                }
+                items.push(item);
+                appendItemRow(item);
+                var row = rowFor(item.uid);
+                row.querySelector('.js-item-catalog-search').value = item.catalogCode
+                    ? item.catalogCode + ' — ' + item.description
+                    : item.description;
+                row.querySelector('.js-item-unit').value = item.unit;
+                row.querySelector('.js-item-quantity').value = item.quantity;
+                row.querySelector('.js-item-unit-price').value = item.unitPrice;
+                row.querySelector('.js-item-lot').value = item.lot;
+                row.querySelector('.js-item-expiry').value = item.expiryDate;
+                updatePackToggle(row, item);
+            });
+            renumberItems();
+            syncItems();
+        }
+
+        itemsList.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-action]');
+            if (!btn) return;
+            var row = btn.closest('.js-item-row');
+            if (!row) return;
+            var uid = row.getAttribute('data-item');
+            if (btn.getAttribute('data-action') === 'remove-item') removeItem(uid);
+        });
+
+        itemsList.addEventListener('input', function (e) {
+            var row = e.target.closest('.js-item-row');
+            if (!row) return;
+            var item = itemByUid(row.getAttribute('data-item'));
+            if (!item) return;
+
+            if (e.target.classList.contains('js-item-unit')) { item.unit = e.target.value; syncItems(); }
+            else if (e.target.classList.contains('js-item-quantity')) {
+                item.quantity = e.target.value;
+                updatePackPreview(row, item);
+                syncItems();
+            }
+            else if (e.target.classList.contains('js-item-unit-price')) { item.unitPrice = e.target.value; syncItems(); }
+            else if (e.target.classList.contains('js-item-lot')) { item.lot = e.target.value; syncItems(); }
+            else if (e.target.classList.contains('js-item-expiry')) { item.expiryDate = e.target.value; syncItems(); }
+        });
+
+        itemsList.addEventListener('change', function (e) {
+            if (!e.target.classList.contains('js-item-unit-mode')) return;
+            var row = e.target.closest('.js-item-row');
+            var item = itemByUid(row.getAttribute('data-item'));
+            if (!item) return;
+            item.unitMode = e.target.value;
+            // `unit` is intentionally left untouched here - see the identical comment in
+            // warehouse_transactions.html; the reason (lot-grouping stability) applies to
+            // the linked Stock Out transaction the same way.
+            updatePackPreview(row, item);
+            syncItems();
+        });
+
+        document.getElementById('addItemBtn').addEventListener('click', function () { addItem(); });
+
+        /* ------------------------------------------------- submit-time validation */
+        recordForm.addEventListener('submit', function (e) {
+            if (!items.length) {
+                e.preventDefault();
+                alert('Add at least one line item before submitting.');
+                return;
+            }
+            for (var i = 0; i < items.length; i++) {
+                var it = items[i], n = i + 1;
+                if (!(it.description || '').trim()) {
+                    e.preventDefault(); alert('Line item ' + n + ' needs a description.'); return;
+                }
+                if (!(parseInt(it.quantity, 10) > 0)) {
+                    e.preventDefault(); alert('Line item ' + n + ' needs a quantity.'); return;
+                }
+                if (!(parseFloat(it.unitPrice) >= 0)) {
+                    e.preventDefault(); alert('Line item ' + n + ' needs a unit price.'); return;
+                }
+            }
+        });
+
+        /* ------------------------------------------------------------- add / edit */
+        var recordModalTitle = document.getElementById('recordModalTitle');
+        var recordSubmitBtn = document.getElementById('recordSubmitBtn');
+        var addUrl = "{{ url_for('main.invoice_add') }}";
+        function editUrl(id) { return '/page/invoice_invoices/' + id + '/edit'; }
+
+        document.getElementById('addNewBtn').addEventListener('click', function () {
+            recordForm.reset();
+            recordForm.action = addUrl;
+            recordModalTitle.textContent = 'Add Invoice';
+            recordSubmitBtn.innerHTML = '<i data-lucide="send" class="h-4 w-4"></i>Record Invoice';
+            customerPicker.reset();
+            CUSTOMER_PRICES = {};
+            stockOutUserTouched = false;
+            fieldCreateStockOut.checked = true;
+            resetItems();
+            OS.refreshIcons();
+            OS.openModal('recordModal');
+        });
+
+        function openEdit(row) {
+            recordForm.action = editUrl(row.getAttribute('data-id'));
+            recordModalTitle.textContent = 'Edit Invoice';
+            recordSubmitBtn.innerHTML = '<i data-lucide="check" class="h-4 w-4"></i>Save Changes';
+
+            var customerId = row.getAttribute('data-customer-id');
+            var customer = customerId ? CUSTOMERS.find(function (c) { return String(c.id) === customerId; }) : null;
+            document.getElementById('customerSearchInput').value = customer
+                ? (customer.code + ' — ' + (customer.name || '')) : '';
+            fieldCustomerId.value = customerId || '';
+            CUSTOMER_PRICES = {};
+            stockOutUserTouched = true; // editing never re-creates a Stock Out, so the auto-toggle is irrelevant
+
+            fieldSoldTo.value = row.getAttribute('data-sold-to') || '';
+            fieldAddress.value = row.getAttribute('data-address') || '';
+            fieldTin.value = row.getAttribute('data-tin') || '';
+            fieldInvoiceDate.value = row.getAttribute('data-invoice-date') || '';
+            document.getElementById('fieldBranch').value = row.getAttribute('data-branch') || '';
+            fieldPaymentTerms.value = row.getAttribute('data-payment-terms') || '';
+            fieldPaymentDueDate.value = row.getAttribute('data-payment-due-date') || '';
+            document.getElementById('fieldCustomerPo').value = row.getAttribute('data-customer-po') || '';
+            document.getElementById('fieldNoaNumber').value = row.getAttribute('data-noa-number') || '';
+            document.getElementById('fieldSalesPerson').value = row.getAttribute('data-sales-person') || '';
+            fieldInvoiceType.value = row.getAttribute('data-invoice-type') || 'Regular';
+            document.getElementById('fieldNotes').value = row.getAttribute('data-notes') || '';
+
+            var invItems = [];
+            try {
+                invItems = JSON.parse(row.getAttribute('data-items') || '[]');
+            } catch (err) {
+                invItems = [];
+            }
+            loadItems(invItems);
+
+            OS.refreshIcons();
+            OS.openModal('recordModal');
+        }
+
+        /* --------------------------------------------------------- view/print/deliver/pay/void */
+        function renderViewItems(row) {
+            var wrap = document.getElementById('viewItems');
+            var invItems = [];
+            try {
+                invItems = JSON.parse(row.getAttribute('data-items') || '[]');
+            } catch (err) {
+                invItems = [];
+            }
+            if (!invItems.length) {
+                wrap.innerHTML = '<p class="text-slate-500 dark:text-slate-400">No line items.</p>';
+                return;
+            }
+            wrap.innerHTML = invItems.map(function (it, i) {
+                var meta = [];
+                if (it.enteredPackSize) {
+                    var inv = it.itemId ? INVENTORY_ITEMS.find(function (i) { return i.id === it.itemId; }) : null;
+                    meta.push(it.enteredQuantity + ' ' + ((inv && inv.purchaseUnit) || 'BOX') + ' (' + it.quantity + ' ' + (it.unit || 'pcs') + ')');
+                } else if (it.quantity != null) {
+                    meta.push(it.quantity + (it.unit ? ' ' + it.unit : ''));
+                }
+                if (it.unitPrice != null) meta.push('@ ' + peso(it.unitPrice) + ' = ' + peso(it.amount));
+                if (it.lot) meta.push('Lot ' + it.lot);
+                if (it.expiryDate) meta.push('Exp ' + formatDateDisplay(it.expiryDate));
+                return '<div class="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
+                    + '<div class="flex items-center justify-between gap-2">'
+                    + '<span class="text-xs font-semibold text-slate-900 dark:text-white">' + (i + 1) + '. '
+                    + escapeHtml(it.description || it.catalogCode || '—') + '</span>'
+                    + '</div><p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">' + meta.join(' · ') + '</p></div>';
+            }).join('');
+        }
+
+        var DIRECTION_LABEL = { IN: 'Stock In', OUT: 'Stock Out' };
+
+        function renderViewTxns(row) {
+            var wrap = document.getElementById('viewTxns');
+            var wrapOuter = document.getElementById('viewTxnsWrap');
+            var warning = document.getElementById('viewTxnsWarning');
+            var txns = [];
+            try {
+                txns = JSON.parse(row.getAttribute('data-txns') || '[]');
+            } catch (err) {
+                txns = [];
+            }
+            wrapOuter.classList.toggle('hidden', !txns.length);
+            if (!txns.length) return;
+            wrap.innerHTML = txns.map(function (t) {
+                return '<p class="text-slate-700 dark:text-slate-300">#' + ('000000' + t.id).slice(-6) + ' · '
+                    + (DIRECTION_LABEL[t.direction] || t.direction) + ' · ' + t.status + '</p>';
+            }).join('');
+            warning.classList.toggle('hidden', txns.every(function (t) { return t.status === 'Finished' || t.status === 'Void'; }));
+        }
+
+        function openView(row) {
+            document.getElementById('viewInvoiceNumber').textContent = row.getAttribute('data-invoice-number') || '—';
+            document.getElementById('viewStatus').textContent = row.getAttribute('data-status') || '—';
+            document.getElementById('viewInvoiceDate').textContent = formatDateDisplay(row.getAttribute('data-invoice-date')) || '—';
+            document.getElementById('viewBranch').textContent = row.getAttribute('data-branch') || '—';
+            document.getElementById('viewSoldTo').textContent = row.getAttribute('data-sold-to') || '—';
+            document.getElementById('viewTin').textContent = row.getAttribute('data-tin') || '—';
+            document.getElementById('viewCustomerPo').textContent = row.getAttribute('data-customer-po') || '—';
+            document.getElementById('viewNoaNumber').textContent = row.getAttribute('data-noa-number') || '—';
+            document.getElementById('viewSalesPerson').textContent = row.getAttribute('data-sales-person') || '—';
+            document.getElementById('viewPaymentTerms').textContent = row.getAttribute('data-payment-terms') || '—';
+            document.getElementById('viewPaymentDueDate').textContent = formatDateDisplay(row.getAttribute('data-payment-due-date')) || '—';
+            document.getElementById('viewInvoiceType').textContent = row.getAttribute('data-invoice-type') || '—';
+
+            var vatable = row.getAttribute('data-vatable-amount');
+            var vat = row.getAttribute('data-vat-amount');
+            var total = row.getAttribute('data-total-amount');
+            document.getElementById('viewVatable').textContent = vatable ? peso(vatable) : '—';
+            document.getElementById('viewVat').textContent = vat ? peso(vat) : '—';
+            document.getElementById('viewTotal').textContent = total ? peso(total) : '—';
+
+            document.getElementById('viewCreatedBy').textContent = row.getAttribute('data-created-by-name') || '—';
+            document.getElementById('viewPrintedBy').textContent = row.getAttribute('data-printed-by-name') || '—';
+            document.getElementById('viewDeliveredBy').textContent = row.getAttribute('data-delivered-by-name') || '—';
+            document.getElementById('viewPaidBy').textContent = row.getAttribute('data-paid-by-name') || '—';
+
+            var voidedBy = row.getAttribute('data-voided-by-name');
+            document.getElementById('viewVoidWrap').classList.toggle('hidden', !voidedBy);
+            document.getElementById('viewVoidedBy').textContent = voidedBy ? ('(' + voidedBy + ')') : '';
+            document.getElementById('viewVoidReason').textContent = row.getAttribute('data-void-reason') || '';
+
+            renderViewItems(row);
+            renderViewTxns(row);
+
+            var notes = row.getAttribute('data-notes');
+            document.getElementById('viewNotesWrap').classList.toggle('hidden', !notes);
+            document.getElementById('viewNotes').textContent = notes || '';
+
+            OS.openModal('viewModal');
+        }
+
+        var voidForm = document.getElementById('voidForm');
+
+        tbody.addEventListener('click', function (e) {
+            var viewBtn = e.target.closest('.js-view');
+            var editBtn = e.target.closest('.js-edit');
+            var printBtn = e.target.closest('.js-print');
+            var deliverBtn = e.target.closest('.js-deliver');
+            var payBtn = e.target.closest('.js-pay');
+            var voidBtn = e.target.closest('.js-void');
+
+            if (viewBtn) openView(viewBtn.closest('tr'));
+            if (editBtn) openEdit(editBtn.closest('tr'));
+            if (printBtn && confirm('Mark this invoice as printed?')) {
+                var f1 = document.createElement('form');
+                f1.method = 'POST'; f1.action = printBtn.getAttribute('data-url');
+                document.body.appendChild(f1); f1.submit();
+            }
+            if (deliverBtn && confirm('Mark this invoice as delivered?')) {
+                var f2 = document.createElement('form');
+                f2.method = 'POST'; f2.action = deliverBtn.getAttribute('data-url');
+                document.body.appendChild(f2); f2.submit();
+            }
+            if (payBtn && confirm('Mark this invoice as paid?')) {
+                var f3 = document.createElement('form');
+                f3.method = 'POST'; f3.action = payBtn.getAttribute('data-url');
+                document.body.appendChild(f3); f3.submit();
+            }
+            if (voidBtn) {
+                document.getElementById('voidReason').value = '';
+                voidForm.action = '/page/invoice_invoices/' + voidBtn.closest('tr').getAttribute('data-id') + '/void';
+                OS.openModal('voidConfirmModal');
+            }
+        });
+
+        /* --------------------------------------------------------------- search */
+        var searchInput = document.getElementById('invoiceSearch');
+        searchInput.addEventListener('search', function () {
+            if (searchInput.value === '') document.getElementById('searchForm').submit();
+        });
+    })();
+</script>
+{% endblock %}
