@@ -326,12 +326,7 @@
             fieldUnit.value = currentValue || (item && (item.baseUnit || item.salesUnit || item.purchaseUnit)) || '';
         }
 
-        function todayIso() {
-            var d = new Date();
-            var m = String(d.getMonth() + 1).padStart(2, '0');
-            var day = String(d.getDate()).padStart(2, '0');
-            return d.getFullYear() + '-' + m + '-' + day;
-        }
+        var todayIso = OS.todayIso;
 
         function deleteUrl(id) { return '/page/parameters_customers/' + customerId + '/products/' + id + '/delete'; }
 

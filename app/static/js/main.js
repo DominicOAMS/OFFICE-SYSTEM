@@ -284,11 +284,28 @@
         });
     });
 
+    // Peso formatting and "today" as YYYY-MM-DD - extracted from five/four near-identical
+    // copies respectively (every module with money fields, every module with a date
+    // field that defaults to today). Number(n || 0) guards the same way the most
+    // defensive of those copies already did - callers pass both real numbers and
+    // stringified data-attribute values, and a null/undefined amount should read as
+    // ₱0.00, not throw or print "NaN".
+    function peso(n) {
+        return '₱' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function todayIso() {
+        var d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
     // Exposed for page-level scripts.
     window.OS = {
         openModal: openModal,
         closeModal: closeModal,
         refreshIcons: refreshIcons,
         toggleTheme: toggleTheme,
+        peso: peso,
+        todayIso: todayIso,
     };
 })();

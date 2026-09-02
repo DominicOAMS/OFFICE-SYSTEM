@@ -540,10 +540,7 @@
         var recordForm = document.getElementById('recordForm');
         var tbody = document.getElementById('recordsBody');
 
-        function todayIso() {
-            var d = new Date();
-            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-        }
+        var todayIso = OS.todayIso;
 
         /* ------------------------------------------------- searchable name pickers
            Shared factory in static/js/pickers.js - same [data-dropdown] contract every
@@ -743,9 +740,7 @@
         var vatDisplay = document.getElementById('vatDisplay');
         var grandTotalDisplay = document.getElementById('grandTotalDisplay');
 
-        function peso(n) {
-            return '₱' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        }
+        var peso = OS.peso;
 
         function itemByUid(uid) {
             for (var i = 0; i < items.length; i++) {

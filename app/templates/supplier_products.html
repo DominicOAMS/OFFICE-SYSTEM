@@ -444,12 +444,7 @@
             return '/page/parameters_suppliers/' + supplierId + '/products/' + id + '/edit';
         }
 
-        function todayIso() {
-            var d = new Date();
-            return d.getFullYear() + '-' +
-                   String(d.getMonth() + 1).padStart(2, '0') + '-' +
-                   String(d.getDate()).padStart(2, '0');
-        }
+        var todayIso = OS.todayIso;
 
         function peso(v) {
             var n = parseFloat(v);

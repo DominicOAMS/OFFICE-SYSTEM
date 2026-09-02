@@ -346,9 +346,7 @@
         var recordForm = document.getElementById('recordForm');
         var tbody = document.getElementById('recordsBody');
 
-        function peso(n) {
-            return '₱' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        }
+        var peso = OS.peso;
 
         /* Searchable name pickers - shared factory in static/js/pickers.js (same
            [data-dropdown] contract every module's picker uses). */

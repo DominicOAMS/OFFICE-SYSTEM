@@ -627,12 +627,7 @@
             success: ['bg-emerald-50', 'text-emerald-700', 'dark:bg-emerald-500/10', 'dark:text-emerald-300'],
         };
 
-        function todayIso() {
-            var d = new Date();
-            return d.getFullYear() + '-'
-                + String(d.getMonth() + 1).padStart(2, '0') + '-'
-                + String(d.getDate()).padStart(2, '0');
-        }
+        var todayIso = OS.todayIso;
 
         var escapeHtml = Pickers.escapeHtml;
 

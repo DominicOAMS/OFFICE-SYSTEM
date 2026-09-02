@@ -481,9 +481,7 @@
 
         var escapeHtml = Pickers.escapeHtml;
 
-        function peso(n) {
-            return '₱' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        }
+        var peso = OS.peso;
 
         function formatDateDisplay(iso) {
             if (!iso) return '';
