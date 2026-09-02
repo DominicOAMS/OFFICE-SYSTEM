@@ -295,11 +295,7 @@
         function editUrl(id) { return '/page/warehouse_stocks/items/' + id + '/edit'; }
         function deleteUrl(id) { return '/page/warehouse_stocks/items/' + id + '/delete'; }
 
-        function escapeHtml(text) {
-            return String(text == null ? '' : text)
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;');
-        }
+        var escapeHtml = Pickers.escapeHtml;
 
         /* ------------------------------------------------------------- add / edit item */
         var fieldPurchaseUnit = document.getElementById('fieldPurchaseUnit');

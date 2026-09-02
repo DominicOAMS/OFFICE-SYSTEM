@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
 
 {% block title %}Invoices - Office System{% endblock %}
 
@@ -179,65 +180,10 @@
             </table>
         </div>
 
-        <!-- Pagination -->
-        {% if page_count > 1 %}
-        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3
-                    dark:border-slate-800">
-            <p class="text-sm text-slate-500 dark:text-slate-400">
-                Showing <span class="font-medium text-slate-700 dark:text-slate-200">{{ ((page - 1) * per_page) + 1 }}</span>–<span
-                    class="font-medium text-slate-700 dark:text-slate-200">{{ [page * per_page, total]|min }}</span>
-                of <span class="font-medium text-slate-700 dark:text-slate-200">{{ '{:,}'.format(total) }}</span>
-            </p>
-
-            {% macro page_url(p) -%}
-                {{ url_for('main.invoices', page=p, q=search or None, status=status or None, branch=branch or None) }}
-            {%- endmacro %}
-
-            <nav class="flex items-center gap-1" aria-label="Pagination">
-                {% if page > 1 %}
-                    <a href="{{ page_url(page - 1) }}" class="btn btn-secondary btn-sm" aria-label="Previous page">
-                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
-                    </a>
-                {% else %}
-                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
-                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
-                    </span>
-                {% endif %}
-
-                {% set win_start = [1, page - 2]|max %}
-                {% set win_end = [page_count, win_start + 4]|min %}
-                {% set win_start = [1, win_end - 4]|max %}
-
-                {% if win_start > 1 %}
-                    <a href="{{ page_url(1) }}" class="btn btn-secondary btn-sm">1</a>
-                    {% if win_start > 2 %}<span class="px-1 text-slate-400">…</span>{% endif %}
-                {% endif %}
-
-                {% for p in range(win_start, win_end + 1) %}
-                    {% if p == page %}
-                        <span class="btn btn-sm bg-accent-600 text-white shadow-sm">{{ p }}</span>
-                    {% else %}
-                        <a href="{{ page_url(p) }}" class="btn btn-secondary btn-sm">{{ p }}</a>
-                    {% endif %}
-                {% endfor %}
-
-                {% if win_end < page_count %}
-                    {% if win_end < page_count - 1 %}<span class="px-1 text-slate-400">…</span>{% endif %}
-                    <a href="{{ page_url(page_count) }}" class="btn btn-secondary btn-sm">{{ page_count }}</a>
-                {% endif %}
-
-                {% if page < page_count %}
-                    <a href="{{ page_url(page + 1) }}" class="btn btn-secondary btn-sm" aria-label="Next page">
-                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
-                    </a>
-                {% else %}
-                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
-                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
-                    </span>
-                {% endif %}
-            </nav>
-        </div>
-        {% endif %}
+        {{ render_pagination(
+            'main.invoices', page, page_count, total, per_page,
+            {'q': search or None, 'status': status or None, 'branch': branch or None}
+        ) }}
     </div>
 </div>
 
@@ -533,11 +479,7 @@
         var recordForm = document.getElementById('recordForm');
         var tbody = document.getElementById('recordsBody');
 
-        function escapeHtml(text) {
-            return String(text == null ? '' : text)
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;');
-        }
+        var escapeHtml = Pickers.escapeHtml;
 
         function peso(n) {
             return '₱' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -553,63 +495,8 @@
 
         /* ------------------------------------------------- searchable customer picker
            Same [data-dropdown] contract as warehouse_transactions.html's initSearchablePicker. */
-        var searchablePanels = [];
-
-        function closeAllOtherDropdowns(exceptPanel) {
-            searchablePanels.forEach(function (p) {
-                if (p !== exceptPanel) p.classList.add('hidden');
-            });
-        }
-
-        function initSearchablePicker(inputId, hiddenId, panelId, items, getId, getLabel) {
-            var input = document.getElementById(inputId);
-            var hidden = document.getElementById(hiddenId);
-            var panel = document.getElementById(panelId);
-            searchablePanels.push(panel);
-
-            function render(filterText) {
-                var term = (filterText || '').trim().toLowerCase();
-                var matches = items.filter(function (item) {
-                    return !term || getLabel(item).toLowerCase().indexOf(term) !== -1;
-                });
-                panel.innerHTML = matches.length
-                    ? matches.map(function (item) {
-                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-id="'
-                            + getId(item) + '" data-name="' + getLabel(item).replace(/"/g, '&quot;') + '">' + getLabel(item) + '</button>';
-                    }).join('')
-                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matches</p>';
-            }
-
-            panel.addEventListener('click', function (e) {
-                var btn = e.target.closest('button[data-id]');
-                if (!btn) return;
-                input.value = btn.getAttribute('data-name');
-                hidden.value = btn.getAttribute('data-id');
-                hidden.dispatchEvent(new Event('change'));
-                panel.classList.add('hidden');
-            });
-
-            input.addEventListener('input', function () {
-                hidden.value = '';
-                render(input.value);
-                panel.classList.remove('hidden');
-            });
-
-            input.addEventListener('click', function (e) {
-                e.stopPropagation();
-                closeAllOtherDropdowns(panel);
-                render(input.value);
-                panel.classList.remove('hidden');
-            });
-
-            return {
-                reset: function () {
-                    input.value = '';
-                    hidden.value = '';
-                    render('');
-                },
-            };
-        }
+        var closeAllOtherDropdowns = Pickers.closeAllOtherDropdowns;
+        var initSearchablePicker = Pickers.initSearchablePicker;
 
         var customerPicker = initSearchablePicker(
             'customerSearchInput', 'fieldCustomerId', 'customerOptions', CUSTOMERS,
@@ -729,7 +616,7 @@
         function initItemCatalogPicker(row, item) {
             var input = row.querySelector('.js-item-catalog-search');
             var panel = row.querySelector('.js-item-catalog-panel');
-            searchablePanels.push(panel);
+            Pickers.registerPanel(panel);
 
             function label(inv) { return inv.catalog + ' — ' + (inv.description || ''); }
 
