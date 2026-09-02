@@ -1,0 +1,645 @@
+{% extends "base.html" %}
+
+{% block title %}Check Vouchers - Office System{% endblock %}
+
+{% block content %}
+{% set STATUS_TONE = {
+    'Prepared': 'badge-slate',
+    'Checked': 'badge-warning',
+    'Approved': 'badge-success',
+    'Paid': 'badge-info',
+    'Void': 'badge-accent'
+} %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="banknote" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Check Vouchers</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    Prepare a check to pay off one or more Verified payables owed to a supplier.
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Prepare Voucher
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="banknote" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Check Vouchers
+            </h2>
+            <div class="flex items-center gap-2">
+                <form method="GET" action="{{ url_for('main.check_vouchers') }}" class="relative" id="searchForm">
+                    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" id="voucherSearch" value="{{ search }}"
+                           placeholder="Search voucher #, payee…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </form>
+                <span class="badge badge-slate whitespace-nowrap">{{ '{:,}'.format(total) }} shown</span>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+            {% for value, label in [
+                ('', 'All'),
+                ('Prepared', 'Prepared'),
+                ('Checked', 'Checked'),
+                ('Approved', 'Approved'),
+                ('Paid', 'Paid'),
+                ('Void', 'Void')
+            ] %}
+            <a href="{{ url_for('main.check_vouchers', q=search or None, status=value or None) }}"
+               class="badge {{ 'bg-accent-600 text-white ring-0' if status == value else 'badge-slate' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[56rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th w-32">Voucher #</th>
+                        <th class="table-th">Supplier</th>
+                        <th class="table-th w-28">Voucher Date</th>
+                        <th class="table-th w-28">Total</th>
+                        <th class="table-th w-28">Net Amount</th>
+                        <th class="table-th w-32">Status</th>
+                        <th class="table-th w-32 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for v in vouchers %}
+                    <tr class="table-row"
+                        data-id="{{ v.id }}"
+                        data-voucher-number="{{ v.voucherNumber }}"
+                        data-supplier-name="{{ v.payeeName or '—' }}"
+                        data-check-number="{{ v.checkNumber or '' }}"
+                        data-voucher-date="{{ v.voucherDate or '' }}"
+                        data-due-date="{{ v.dueDate or '' }}"
+                        data-total-amount="{{ v.totalAmount }}"
+                        data-total-ewt-amount="{{ v.totalEwtAmount }}"
+                        data-net-amount="{{ v.netAmount }}"
+                        data-status="{{ v.status }}"
+                        data-created-by-name="{{ v.createdByName or '' }}"
+                        data-checked-by-name="{{ v.checkedByName or '' }}"
+                        data-checked-at="{{ v.checkedAt or '' }}"
+                        data-approved-by-name="{{ v.approvedByName or '' }}"
+                        data-approved-at="{{ v.approvedAt or '' }}"
+                        data-paid-by-name="{{ v.paidByName or '' }}"
+                        data-paid-at="{{ v.paidAt or '' }}"
+                        data-void-reason="{{ v.voidReason or '' }}"
+                        {# single-quoted: Flask's tojson escapes < > & ' but not ",
+                           and JSON is full of " - see purchase_orders.html's data-items #}
+                        data-payables='{{ payables_by_voucher.get(v.id, [])|tojson }}'>
+                        <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">{{ v.voucherNumber }}</td>
+                        <td class="table-td truncate">{{ v.payeeName or '—' }}</td>
+                        <td class="table-td text-sm">{{ v.voucherDate or '—' }}</td>
+                        <td class="table-td text-sm">₱{{ '{:,.2f}'.format(v.totalAmount) }}</td>
+                        <td class="table-td text-sm">₱{{ '{:,.2f}'.format(v.netAmount) }}</td>
+                        <td class="table-td">
+                            <span class="badge {{ STATUS_TONE.get(v.status, 'badge-slate') }}">{{ v.status }}</span>
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-view" title="View" aria-label="View Voucher">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                                {% if v.status == 'Prepared' and v.createdBy != session.get('user_id') %}
+                                <button type="button" class="btn btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 js-check"
+                                        data-url="{{ url_for('main.voucher_check', voucher_id=v.id) }}" title="Mark Checked">
+                                    <i data-lucide="check" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if v.status == 'Checked' and v.createdBy != session.get('user_id') %}
+                                <button type="button" class="btn btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 js-approve"
+                                        data-url="{{ url_for('main.voucher_approve', voucher_id=v.id) }}" title="Approve">
+                                    <i data-lucide="check-check" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if v.status == 'Approved' and v.createdBy != session.get('user_id') %}
+                                <button type="button" class="btn btn-icon text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 js-pay"
+                                        data-url="{{ url_for('main.voucher_pay', voucher_id=v.id) }}" title="Mark Paid">
+                                    <i data-lucide="banknote" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if v.createdBy == session.get('user_id') and v.status not in ('Void', 'Paid') %}
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-void"
+                                        data-url="{{ url_for('main.voucher_void', voucher_id=v.id) }}" title="Void">
+                                    <i data-lucide="ban" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="banknote" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No vouchers match your filters</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if page_count > 1 %}
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3
+                    dark:border-slate-800">
+            <p class="text-sm text-slate-500 dark:text-slate-400">
+                Showing <span class="font-medium text-slate-700 dark:text-slate-200">{{ ((page - 1) * per_page) + 1 }}</span>–<span
+                    class="font-medium text-slate-700 dark:text-slate-200">{{ [page * per_page, total]|min }}</span>
+                of <span class="font-medium text-slate-700 dark:text-slate-200">{{ '{:,}'.format(total) }}</span>
+            </p>
+
+            {% macro page_url(p) -%}
+                {{ url_for('main.check_vouchers', page=p, q=search or None, status=status or None) }}
+            {%- endmacro %}
+
+            <nav class="flex items-center gap-1" aria-label="Pagination">
+                {% if page > 1 %}
+                    <a href="{{ page_url(page - 1) }}" class="btn btn-secondary btn-sm" aria-label="Previous page">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </span>
+                {% endif %}
+
+                {% set win_start = [1, page - 2]|max %}
+                {% set win_end = [page_count, win_start + 4]|min %}
+                {% set win_start = [1, win_end - 4]|max %}
+
+                {% if win_start > 1 %}
+                    <a href="{{ page_url(1) }}" class="btn btn-secondary btn-sm">1</a>
+                    {% if win_start > 2 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                {% endif %}
+
+                {% for p in range(win_start, win_end + 1) %}
+                    {% if p == page %}
+                        <span class="btn btn-sm bg-accent-600 text-white shadow-sm">{{ p }}</span>
+                    {% else %}
+                        <a href="{{ page_url(p) }}" class="btn btn-secondary btn-sm">{{ p }}</a>
+                    {% endif %}
+                {% endfor %}
+
+                {% if win_end < page_count %}
+                    {% if win_end < page_count - 1 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                    <a href="{{ page_url(page_count) }}" class="btn btn-secondary btn-sm">{{ page_count }}</a>
+                {% endif %}
+
+                {% if page < page_count %}
+                    <a href="{{ page_url(page + 1) }}" class="btn btn-secondary btn-sm" aria-label="Next page">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </span>
+                {% endif %}
+            </nav>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ===================== Prepare Voucher modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-2xl">
+        <form id="recordForm" method="POST" action="{{ url_for('main.voucher_add') }}">
+            <div class="modal-header">
+                <h3 class="modal-title">Prepare Check Voucher</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-4">
+                <div class="relative" data-dropdown>
+                    <label class="label" for="supplierSearchInput">Supplier <span class="text-accent-600">*</span></label>
+                    <input type="text" class="input" id="supplierSearchInput" placeholder="Search by supplier ID or name…" autocomplete="off" required>
+                    <input type="hidden" id="fieldSupplierId" name="supplierId">
+                    <div data-dropdown-panel id="supplierOptions"
+                         class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label" for="fieldVoucherDate">Voucher Date</label>
+                        <input type="date" class="input" id="fieldVoucherDate" name="voucherDate">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldDueDate">Due Date</label>
+                        <input type="date" class="input" id="fieldDueDate" name="dueDate">
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-200 pt-4 dark:border-slate-800">
+                    <label class="label">Payables to Pay <span class="text-accent-600">*</span></label>
+                    <p class="help mb-3" id="payablesHelp">Choose a supplier above to see its Verified, unclaimed payables.</p>
+
+                    <div id="payablesPickerList" class="max-h-64 space-y-2 overflow-y-auto"></div>
+
+                    <div class="mt-4 space-y-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3
+                                dark:border-slate-700 dark:bg-slate-800/50">
+                        <div class="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+                            <span>Total Amount</span><span id="sumTotal">₱0.00</span>
+                        </div>
+                        <div class="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+                            <span>Total EWT</span><span id="sumEwt">₱0.00</span>
+                        </div>
+                        <div class="flex items-center justify-between border-t border-slate-200 pt-1 text-sm font-semibold
+                                    text-slate-900 dark:border-slate-700 dark:text-white">
+                            <span>Net Amount</span><span id="sumNet">₱0.00</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="label" for="fieldRemarksHeading">Remarks Heading</label>
+                    <input type="text" class="input" id="fieldRemarksHeading" name="remarksHeading" placeholder="e.g. Cash On Delivery">
+                </div>
+                <div>
+                    <label class="label" for="fieldRemarks">Remarks</label>
+                    <textarea class="input" id="fieldRemarks" name="remarks" rows="2"></textarea>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary" id="voucherSubmitBtn" disabled>
+                    <i data-lucide="send" class="h-4 w-4"></i>Prepare Voucher
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== View detail modal ===================== -->
+<div id="viewModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <h3 class="modal-title">Voucher Details</h3>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body space-y-3 text-sm">
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">Voucher #</p><p id="viewVoucherNumber" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Status</p><p id="viewStatus" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Supplier</p><p id="viewSupplier" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Check #</p><p id="viewCheckNumber" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Voucher Date</p><p id="viewVoucherDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Due Date</p><p id="viewDueDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Created By</p><p id="viewCreatedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div>
+                <p class="help mb-1">Payables Covered</p>
+                <div id="viewPayables" class="space-y-2"></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
+                <div><p class="help mb-0.5">Total</p><p id="viewTotal" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Total EWT</p><p id="viewTotalEwt" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div class="col-span-2 border-t border-slate-200 pt-2 dark:border-slate-700">
+                    <p class="help mb-0.5">Net Amount</p><p id="viewNet" class="font-semibold text-slate-900 dark:text-white"></p>
+                </div>
+            </div>
+            <div class="border-t border-slate-200 pt-3 dark:border-slate-800">
+                <p class="help mb-1">Status Timeline</p>
+                <div id="viewTimeline" class="space-y-1"></div>
+            </div>
+            <div id="viewVoidReasonWrap" class="hidden border-t border-slate-200 pt-3 dark:border-slate-800">
+                <p class="help mb-0.5">Void Reason</p><p id="viewVoidReason" class="text-slate-700 dark:text-slate-300"></p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Check/Approve/Pay/Void action modal ===================== -->
+<div id="actionModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="actionForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title" id="actionModalTitle">Check Voucher</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="modal-body space-y-3">
+                <p class="text-sm text-slate-600 dark:text-slate-300" id="actionMessage"></p>
+                <div class="hidden" id="actionCheckNumberWrap">
+                    <label class="label" for="actionCheckNumber">Check Number (optional)</label>
+                    <input type="text" class="input" id="actionCheckNumber" name="checkNumber">
+                </div>
+                <div class="hidden" id="actionReasonWrap">
+                    <label class="label" for="actionReason">Reason</label>
+                    <textarea class="input" id="actionReason" name="reason" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary" id="actionSubmitBtn">
+                    <i data-lucide="check" class="h-4 w-4"></i>Confirm
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var SUPPLIERS = {{ suppliers|tojson }};
+
+        var recordForm = document.getElementById('recordForm');
+        var tbody = document.getElementById('recordsBody');
+
+        function peso(n) {
+            return '₱' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function escapeHtml(text) {
+            return String(text == null ? '' : text)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        /* ------------------------------------------------- supplier picker
+           Same [data-dropdown] contract as payables.html / purchase_orders.html. */
+        var searchablePanels = [];
+
+        function closeAllOtherDropdowns(exceptPanel) {
+            searchablePanels.forEach(function (p) { if (p !== exceptPanel) p.classList.add('hidden'); });
+        }
+
+        function initSearchablePicker(inputId, hiddenId, panelId, items, getId, getLabel, getOptionText) {
+            getOptionText = getOptionText || getLabel;
+            var input = document.getElementById(inputId);
+            var hidden = document.getElementById(hiddenId);
+            var panel = document.getElementById(panelId);
+            searchablePanels.push(panel);
+
+            function render(filterText) {
+                var term = (filterText || '').trim().toLowerCase();
+                var matches = items.filter(function (item) {
+                    return !term || getOptionText(item).toLowerCase().indexOf(term) !== -1;
+                });
+                panel.innerHTML = matches.length
+                    ? matches.map(function (item) {
+                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-id="'
+                            + getId(item) + '" data-name="' + getLabel(item).replace(/"/g, '&quot;') + '">' + escapeHtml(getOptionText(item)) + '</button>';
+                    }).join('')
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matches</p>';
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-id]');
+                if (!btn) return;
+                input.value = btn.getAttribute('data-name');
+                hidden.value = btn.getAttribute('data-id');
+                hidden.dispatchEvent(new Event('change'));
+                panel.classList.add('hidden');
+            });
+
+            input.addEventListener('input', function () {
+                hidden.value = '';
+                hidden.dispatchEvent(new Event('change'));
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            input.addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeAllOtherDropdowns(panel);
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            return {
+                reset: function () {
+                    input.value = '';
+                    hidden.value = '';
+                    hidden.dispatchEvent(new Event('change'));
+                    render('');
+                },
+            };
+        }
+
+        var supplierPicker = initSearchablePicker(
+            'supplierSearchInput', 'fieldSupplierId', 'supplierOptions', SUPPLIERS,
+            function (s) { return s.id; }, function (s) { return s.name; },
+            function (s) { return (s.code || '') + ' — ' + s.name; }
+        );
+
+        /* ------------------------------------------------- payables checklist picker
+           Not a catalog-style add-by-typing picker like every other module's line
+           items - this selects among EXISTING rows (a supplier's own Verified,
+           unclaimed payables), so a plain checkbox list is the right shape. */
+        var payablesPickerList = document.getElementById('payablesPickerList');
+        var payablesHelp = document.getElementById('payablesHelp');
+        var voucherSubmitBtn = document.getElementById('voucherSubmitBtn');
+
+        function renderPayablesPicker(payables) {
+            payablesPickerList._payables = payables;
+            if (!payables.length) {
+                payablesPickerList.innerHTML = '';
+                return;
+            }
+            payablesPickerList.innerHTML = payables.map(function (p) {
+                var label = (p.poNumber ? p.poNumber + ' — ' : '') + (p.description || p.siNumber || ('Payable #' + p.id));
+                return '<label class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">'
+                    + '<span class="flex min-w-0 items-center gap-2">'
+                    + '<input type="checkbox" class="js-payable-check shrink-0" name="payableIds" value="' + p.id + '">'
+                    + '<span class="truncate">' + escapeHtml(label) + '</span>'
+                    + '</span>'
+                    + '<span class="shrink-0 font-medium">' + peso(p.netAmount) + '</span>'
+                    + '</label>';
+            }).join('');
+        }
+
+        function recomputeVoucherTotals() {
+            var payables = payablesPickerList._payables || [];
+            var checkedIds = Array.prototype.slice.call(payablesPickerList.querySelectorAll('.js-payable-check:checked'))
+                .map(function (c) { return c.value; });
+            var selected = payables.filter(function (p) { return checkedIds.indexOf(String(p.id)) !== -1; });
+            var total = selected.reduce(function (s, p) { return s + p.amount; }, 0);
+            var ewt = selected.reduce(function (s, p) { return s + p.ewtAmount; }, 0);
+            var net = selected.reduce(function (s, p) { return s + p.netAmount; }, 0);
+            document.getElementById('sumTotal').textContent = peso(total);
+            document.getElementById('sumEwt').textContent = peso(ewt);
+            document.getElementById('sumNet').textContent = peso(net);
+            voucherSubmitBtn.disabled = selected.length === 0;
+        }
+
+        payablesPickerList.addEventListener('change', function (e) {
+            if (e.target.classList.contains('js-payable-check')) recomputeVoucherTotals();
+        });
+
+        document.getElementById('fieldSupplierId').addEventListener('change', function () {
+            var supplierId = this.value;
+            if (!supplierId) {
+                renderPayablesPicker([]);
+                payablesHelp.textContent = 'Choose a supplier above to see its Verified, unclaimed payables.';
+                recomputeVoucherTotals();
+                return;
+            }
+            payablesHelp.textContent = 'Loading payables…';
+            fetch('{{ url_for("main.voucher_payables_picker") }}?supplierId=' + encodeURIComponent(supplierId))
+                .then(function (r) { return r.json(); })
+                .then(function (payables) {
+                    renderPayablesPicker(payables);
+                    payablesHelp.textContent = payables.length
+                        ? (payables.length + ' payable(s) available to select.')
+                        : 'This supplier has no Verified, unclaimed payables right now.';
+                    recomputeVoucherTotals();
+                })
+                .catch(function () {
+                    renderPayablesPicker([]);
+                    payablesHelp.textContent = 'Could not load payables for this supplier.';
+                    recomputeVoucherTotals();
+                });
+        });
+
+        /* ------------------------------------------------------------- add */
+        document.getElementById('addNewBtn').addEventListener('click', function () {
+            recordForm.reset();
+            supplierPicker.reset();
+            renderPayablesPicker([]);
+            payablesHelp.textContent = 'Choose a supplier above to see its Verified, unclaimed payables.';
+            recomputeVoucherTotals();
+            OS.openModal('recordModal');
+        });
+
+        /* --------------------------------------------------------------- view */
+        function renderViewPayables(row) {
+            var wrap = document.getElementById('viewPayables');
+            var payables = [];
+            try {
+                payables = JSON.parse(row.getAttribute('data-payables') || '[]');
+            } catch (err) {
+                payables = [];
+            }
+            if (!payables.length) {
+                wrap.innerHTML = '<p class="text-slate-500 dark:text-slate-400">No payables linked (likely a migrated historical voucher).</p>';
+                return;
+            }
+            wrap.innerHTML = payables.map(function (p, i) {
+                var label = (p.poNumber ? p.poNumber + ' — ' : '') + (p.description || p.siNumber || ('Payable #' + p.id));
+                return '<div class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
+                    + '<span class="truncate text-xs font-medium text-slate-900 dark:text-white">' + (i + 1) + '. ' + escapeHtml(label) + '</span>'
+                    + '<span class="shrink-0 text-xs text-slate-500 dark:text-slate-400">' + peso(p.netAmount) + '</span>'
+                    + '</div>';
+            }).join('');
+        }
+
+        function renderTimeline(row) {
+            var wrap = document.getElementById('viewTimeline');
+            var stages = [
+                { label: 'Created', by: row.getAttribute('data-created-by-name'), done: true },
+                { label: 'Checked', by: row.getAttribute('data-checked-by-name'), done: !!row.getAttribute('data-checked-at') },
+                { label: 'Approved', by: row.getAttribute('data-approved-by-name'), done: !!row.getAttribute('data-approved-at') },
+                { label: 'Paid', by: row.getAttribute('data-paid-by-name'), done: !!row.getAttribute('data-paid-at') },
+            ];
+            wrap.innerHTML = stages.map(function (s) {
+                var cls = s.done ? 'text-slate-700 dark:text-slate-300' : 'text-slate-400 dark:text-slate-600';
+                return '<p class="text-xs ' + cls + '">' + (s.done ? '✓' : '○') + ' ' + s.label
+                    + (s.done && s.by ? ' — ' + escapeHtml(s.by) : '') + '</p>';
+            }).join('');
+        }
+
+        function renderView(row) {
+            document.getElementById('viewVoucherNumber').textContent = row.getAttribute('data-voucher-number') || '—';
+            document.getElementById('viewStatus').textContent = row.getAttribute('data-status') || '—';
+            document.getElementById('viewSupplier').textContent = row.getAttribute('data-supplier-name') || '—';
+            document.getElementById('viewCheckNumber').textContent = row.getAttribute('data-check-number') || '—';
+            document.getElementById('viewVoucherDate').textContent = row.getAttribute('data-voucher-date') || '—';
+            document.getElementById('viewDueDate').textContent = row.getAttribute('data-due-date') || '—';
+            document.getElementById('viewCreatedBy').textContent = row.getAttribute('data-created-by-name') || '—';
+
+            renderViewPayables(row);
+            renderTimeline(row);
+
+            document.getElementById('viewTotal').textContent = peso(row.getAttribute('data-total-amount'));
+            document.getElementById('viewTotalEwt').textContent = peso(row.getAttribute('data-total-ewt-amount'));
+            document.getElementById('viewNet').textContent = peso(row.getAttribute('data-net-amount'));
+
+            var voidReason = row.getAttribute('data-void-reason');
+            document.getElementById('viewVoidReasonWrap').classList.toggle('hidden', !voidReason);
+            document.getElementById('viewVoidReason').textContent = voidReason || '';
+
+            OS.openModal('viewModal');
+        }
+
+        /* --------------------------------------------------- check/approve/pay/void action modal */
+        var actionForm = document.getElementById('actionForm');
+        var actionModalTitle = document.getElementById('actionModalTitle');
+        var actionSubmitBtn = document.getElementById('actionSubmitBtn');
+        var actionMessage = document.getElementById('actionMessage');
+        var actionCheckNumberWrap = document.getElementById('actionCheckNumberWrap');
+        var actionReasonWrap = document.getElementById('actionReasonWrap');
+
+        var ACTION_CONFIG = {
+            check: { title: 'Mark Voucher Checked', message: "Confirm this voucher's details have been checked.", btnClass: 'btn-primary', icon: 'check', label: 'Mark Checked' },
+            approve: { title: 'Approve Voucher', message: 'Confirm this voucher is approved for payment.', btnClass: 'btn-primary', icon: 'check-check', label: 'Approve' },
+            pay: { title: 'Mark Voucher Paid', message: 'This marks the voucher Paid and marks every payable it covers as Paid too.', btnClass: 'btn-primary', icon: 'banknote', label: 'Mark Paid' },
+            void: { title: 'Void Voucher', message: 'This cannot be undone. Any linked payables become available to a new voucher again.', btnClass: 'btn-danger', icon: 'ban', label: 'Void' },
+        };
+
+        function openAction(url, action) {
+            var config = ACTION_CONFIG[action];
+            actionForm.action = url;
+            document.getElementById('actionCheckNumber').value = '';
+            document.getElementById('actionReason').value = '';
+            actionCheckNumberWrap.classList.toggle('hidden', action !== 'pay');
+            actionReasonWrap.classList.toggle('hidden', action !== 'void');
+            actionModalTitle.textContent = config.title;
+            actionMessage.textContent = config.message;
+            actionSubmitBtn.className = 'btn ' + config.btnClass;
+            actionSubmitBtn.innerHTML = '<i data-lucide="' + config.icon + '" class="h-4 w-4"></i>' + config.label;
+            OS.refreshIcons();
+            OS.openModal('actionModal');
+        }
+
+        tbody.addEventListener('click', function (e) {
+            var viewBtn = e.target.closest('.js-view');
+            var checkBtn = e.target.closest('.js-check');
+            var approveBtn = e.target.closest('.js-approve');
+            var payBtn = e.target.closest('.js-pay');
+            var voidBtn = e.target.closest('.js-void');
+            if (viewBtn) renderView(viewBtn.closest('tr'));
+            if (checkBtn) openAction(checkBtn.getAttribute('data-url'), 'check');
+            if (approveBtn) openAction(approveBtn.getAttribute('data-url'), 'approve');
+            if (payBtn) openAction(payBtn.getAttribute('data-url'), 'pay');
+            if (voidBtn) openAction(voidBtn.getAttribute('data-url'), 'void');
+        });
+
+        /* --------------------------------------------------------------- search */
+        var searchInput = document.getElementById('voucherSearch');
+        searchInput.addEventListener('search', function () {
+            if (searchInput.value === '') document.getElementById('searchForm').submit();
+        });
+    })();
+</script>
+{% endblock %}

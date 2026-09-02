@@ -1,0 +1,604 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'PO Payables' if mode == 'po' else 'Non-PO Payables' }} - Office System{% endblock %}
+
+{% block content %}
+{% set STATUS_TONE = {
+    'Created': 'badge-slate',
+    'Verified': 'badge-success',
+    'Paid': 'badge-info',
+    'Void': 'badge-accent'
+} %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="{{ 'file-check' if mode == 'po' else 'file-minus' }}" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">
+                    {{ 'PO Payables' if mode == 'po' else 'Non-PO Payables' }}
+                </h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    {% if mode == 'po' %}
+                    Amounts owed to a supplier for a delivered Purchase Order.
+                    {% else %}
+                    Amounts owed to a supplier with no Purchase Order attached.
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Add Payable
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="{{ 'file-check' if mode == 'po' else 'file-minus' }}" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                {{ 'PO Payables' if mode == 'po' else 'Non-PO Payables' }}
+            </h2>
+            <div class="flex items-center gap-2">
+                <form method="GET" action="{{ url_for('main.payables_po' if mode == 'po' else 'main.payables_non_po') }}" class="relative" id="searchForm">
+                    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" id="paySearch" value="{{ search }}"
+                           placeholder="Search PO #, payee, SI #, DR #, reference…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </form>
+                <span class="badge badge-slate whitespace-nowrap">{{ '{:,}'.format(total) }} shown</span>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+            {% for value, label in [
+                ('', 'All'),
+                ('Created', 'Created'),
+                ('Verified', 'Verified'),
+                ('Paid', 'Paid'),
+                ('Void', 'Void')
+            ] %}
+            <a href="{{ url_for('main.payables_po' if mode == 'po' else 'main.payables_non_po', q=search or None, status=value or None) }}"
+               class="badge {{ 'bg-accent-600 text-white ring-0' if status == value else 'badge-slate' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[64rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th w-16">ID</th>
+                        <th class="table-th">Supplier</th>
+                        {% if mode == 'po' %}
+                        <th class="table-th w-28">PO #</th>
+                        {% else %}
+                        <th class="table-th">Description</th>
+                        {% endif %}
+                        <th class="table-th w-36">SI # / DR #</th>
+                        <th class="table-th w-28">Amount</th>
+                        <th class="table-th w-28">Net Amount</th>
+                        <th class="table-th w-32">Status</th>
+                        <th class="table-th w-24 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for p in payables %}
+                    <tr class="table-row"
+                        data-id="{{ p.id }}"
+                        data-supplier-name="{{ p.payeeName or '—' }}"
+                        data-po-number="{{ p.poNumber or '' }}"
+                        data-si-number="{{ p.siNumber or '' }}"
+                        data-dr-number="{{ p.drNumber or '' }}"
+                        data-reference-number="{{ p.referenceNumber or '' }}"
+                        data-description="{{ p.description or '' }}"
+                        data-amount="{{ p.amount }}"
+                        data-ewt-rate="{{ p.ewtRate }}"
+                        data-ewt-amount="{{ p.ewtAmount }}"
+                        data-vatable-amount="{{ p.vatableAmount }}"
+                        data-vat-amount="{{ p.vatAmount }}"
+                        data-net-amount="{{ p.netAmount }}"
+                        data-status="{{ p.status }}"
+                        data-created-by-name="{{ p.createdByName or '' }}"
+                        data-verified-by-name="{{ p.verifiedByName or '' }}"
+                        data-void-reason="{{ p.voidReason or '' }}"
+                        data-claimed-by-voucher-number="{{ p.claimedByVoucherNumber or '' }}">
+                        <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">#{{ p.id }}</td>
+                        <td class="table-td truncate">{{ p.payeeName or '—' }}</td>
+                        {% if mode == 'po' %}
+                        <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">{{ p.poNumber or '—' }}</td>
+                        {% else %}
+                        <td class="table-td truncate">{{ p.description or '—' }}</td>
+                        {% endif %}
+                        <td class="table-td text-xs text-slate-500 dark:text-slate-400">{{ p.siNumber or '—' }} / {{ p.drNumber or '—' }}</td>
+                        <td class="table-td text-sm">₱{{ '{:,.2f}'.format(p.amount) }}</td>
+                        <td class="table-td text-sm">₱{{ '{:,.2f}'.format(p.netAmount) }}</td>
+                        <td class="table-td">
+                            <span class="badge {{ STATUS_TONE.get(p.status, 'badge-slate') }}">{{ p.status }}</span>
+                            {% if p.claimedByVoucherNumber %}
+                            <p class="mt-1 truncate text-[11px] text-slate-400">Voucher: {{ p.claimedByVoucherNumber }}</p>
+                            {% endif %}
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-view" title="View" aria-label="View Payable">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                                {% if p.status == 'Created' and p.createdBy != session.get('user_id') %}
+                                <button type="button" class="btn btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 js-verify"
+                                        data-url="{{ url_for('main.payable_verify', payable_id=p.id) }}" title="Verify">
+                                    <i data-lucide="check" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if p.createdBy == session.get('user_id') and p.status in ('Created', 'Verified') and not p.claimedByVoucherNumber %}
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-void"
+                                        data-url="{{ url_for('main.payable_void', payable_id=p.id) }}" title="Void">
+                                    <i data-lucide="ban" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="{{ 'file-check' if mode == 'po' else 'file-minus' }}" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No payables match your filters</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if page_count > 1 %}
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3
+                    dark:border-slate-800">
+            <p class="text-sm text-slate-500 dark:text-slate-400">
+                Showing <span class="font-medium text-slate-700 dark:text-slate-200">{{ ((page - 1) * per_page) + 1 }}</span>–<span
+                    class="font-medium text-slate-700 dark:text-slate-200">{{ [page * per_page, total]|min }}</span>
+                of <span class="font-medium text-slate-700 dark:text-slate-200">{{ '{:,}'.format(total) }}</span>
+            </p>
+
+            {% macro page_url(p) -%}
+                {{ url_for('main.payables_po' if mode == 'po' else 'main.payables_non_po', page=p, q=search or None, status=status or None) }}
+            {%- endmacro %}
+
+            <nav class="flex items-center gap-1" aria-label="Pagination">
+                {% if page > 1 %}
+                    <a href="{{ page_url(page - 1) }}" class="btn btn-secondary btn-sm" aria-label="Previous page">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+                    </span>
+                {% endif %}
+
+                {% set win_start = [1, page - 2]|max %}
+                {% set win_end = [page_count, win_start + 4]|min %}
+                {% set win_start = [1, win_end - 4]|max %}
+
+                {% if win_start > 1 %}
+                    <a href="{{ page_url(1) }}" class="btn btn-secondary btn-sm">1</a>
+                    {% if win_start > 2 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                {% endif %}
+
+                {% for p in range(win_start, win_end + 1) %}
+                    {% if p == page %}
+                        <span class="btn btn-sm bg-accent-600 text-white shadow-sm">{{ p }}</span>
+                    {% else %}
+                        <a href="{{ page_url(p) }}" class="btn btn-secondary btn-sm">{{ p }}</a>
+                    {% endif %}
+                {% endfor %}
+
+                {% if win_end < page_count %}
+                    {% if win_end < page_count - 1 %}<span class="px-1 text-slate-400">…</span>{% endif %}
+                    <a href="{{ page_url(page_count) }}" class="btn btn-secondary btn-sm">{{ page_count }}</a>
+                {% endif %}
+
+                {% if page < page_count %}
+                    <a href="{{ page_url(page + 1) }}" class="btn btn-secondary btn-sm" aria-label="Next page">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </a>
+                {% else %}
+                    <span class="btn btn-secondary btn-sm cursor-not-allowed opacity-50">
+                        Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+                    </span>
+                {% endif %}
+            </nav>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ===================== Add Payable modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <form id="recordForm" method="POST" action="{{ url_for('main.payable_add') }}">
+            <div class="modal-header">
+                <h3 class="modal-title">Add Payable</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-4">
+                {% if mode == 'po' %}
+                <div class="relative" data-dropdown>
+                    <label class="label" for="poSearchInput">Purchase Order <span class="text-accent-600">*</span></label>
+                    <input type="text" class="input" id="poSearchInput" placeholder="Search by PO number…" autocomplete="off" required>
+                    <input type="hidden" id="fieldPurchaseOrderId" name="purchaseOrderId">
+                    <div data-dropdown-panel id="poOptions"
+                         class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                </div>
+                {% endif %}
+
+                <div class="relative" data-dropdown>
+                    <label class="label" for="supplierSearchInput">Supplier <span class="text-accent-600">*</span></label>
+                    <input type="text"
+                           class="input {{ 'bg-slate-100 dark:bg-slate-800 cursor-not-allowed' if mode == 'po' else '' }}"
+                           id="supplierSearchInput" placeholder="Search by supplier ID or name…" autocomplete="off"
+                           {{ 'disabled' if mode == 'po' else 'required' }}>
+                    <input type="hidden" id="fieldSupplierId" name="supplierId">
+                    <div data-dropdown-panel id="supplierOptions"
+                         class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                </div>
+                {% if mode == 'po' %}<p class="help">Filled in from the selected Purchase Order.</p>{% endif %}
+
+                {% if mode == 'non_po' %}
+                <div>
+                    <label class="label" for="fieldDescription">Description <span class="text-accent-600">*</span></label>
+                    <textarea class="input" id="fieldDescription" name="description" rows="2" required
+                              placeholder="What this bill is for, e.g. August electricity bill"></textarea>
+                </div>
+                {% endif %}
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label" for="fieldSiNumber">Supplier SI #</label>
+                        <input type="text" class="input" id="fieldSiNumber" name="siNumber">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldDrNumber">Supplier DR #</label>
+                        <input type="text" class="input" id="fieldDrNumber" name="drNumber">
+                    </div>
+                </div>
+                <div>
+                    <label class="label" for="fieldReferenceNumber">Reference #</label>
+                    <input type="text" class="input" id="fieldReferenceNumber" name="referenceNumber">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label" for="fieldAmount">Amount (₱, VAT-inclusive) <span class="text-accent-600">*</span></label>
+                        <input type="number" class="input" id="fieldAmount" name="amount" min="0.01" step="0.01" required>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldEwtRate">EWT Rate (%)</label>
+                        <input type="number" class="input" id="fieldEwtRate" name="ewtRate" min="0" max="100" step="0.01" value="1">
+                    </div>
+                </div>
+
+                <div class="space-y-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3
+                            dark:border-slate-700 dark:bg-slate-800/50">
+                    <div class="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+                        <span>Vatable</span><span id="previewVatable">₱0.00</span>
+                    </div>
+                    <div class="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+                        <span>VAT (12%)</span><span id="previewVat">₱0.00</span>
+                    </div>
+                    <div class="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+                        <span>EWT</span><span id="previewEwt">₱0.00</span>
+                    </div>
+                    <div class="flex items-center justify-between border-t border-slate-200 pt-1 text-sm font-semibold
+                                text-slate-900 dark:border-slate-700 dark:text-white">
+                        <span>Net Amount</span><span id="previewNet">₱0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i data-lucide="send" class="h-4 w-4"></i>Submit Payable
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== View detail modal ===================== -->
+<div id="viewModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <h3 class="modal-title">Payable Details</h3>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body space-y-3 text-sm">
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">Supplier</p><p id="viewSupplier" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Status</p><p id="viewStatus" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">PO Number</p><p id="viewPoNumber" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">SI # / DR #</p><p id="viewSiDr" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Reference #</p><p id="viewReference" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Created By</p><p id="viewCreatedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div id="viewDescriptionWrap" class="hidden">
+                <p class="help mb-0.5">Description</p><p id="viewDescription" class="text-slate-700 dark:text-slate-300"></p>
+            </div>
+            <div class="grid grid-cols-2 gap-3 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
+                <div><p class="help mb-0.5">Amount</p><p id="viewAmount" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Vatable</p><p id="viewVatable" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">VAT</p><p id="viewVat" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">EWT (<span id="viewEwtRate"></span>)</p><p id="viewEwt" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div class="col-span-2 border-t border-slate-200 pt-2 dark:border-slate-700">
+                    <p class="help mb-0.5">Net Amount</p><p id="viewNet" class="font-semibold text-slate-900 dark:text-white"></p>
+                </div>
+            </div>
+            <div id="viewVerifiedWrap" class="hidden border-t border-slate-200 pt-3 dark:border-slate-800">
+                <p class="help mb-0.5">Verified By</p><p id="viewVerifiedBy" class="text-slate-700 dark:text-slate-300"></p>
+            </div>
+            <div id="viewVoucherWrap" class="hidden border-t border-slate-200 pt-3 dark:border-slate-800">
+                <p class="help mb-0.5">Linked Voucher</p><p id="viewVoucher" class="text-slate-700 dark:text-slate-300"></p>
+            </div>
+            <div id="viewVoidReasonWrap" class="hidden border-t border-slate-200 pt-3 dark:border-slate-800">
+                <p class="help mb-0.5">Void Reason</p><p id="viewVoidReason" class="text-slate-700 dark:text-slate-300"></p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Verify/Void action modal ===================== -->
+<div id="actionModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="actionForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title" id="actionModalTitle">Verify Payable</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="modal-body hidden" id="actionReasonWrap">
+                <label class="label" for="actionReason">Reason</label>
+                <textarea class="input" id="actionReason" name="reason" rows="3"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary" id="actionSubmitBtn">
+                    <i data-lucide="check" class="h-4 w-4"></i>Verify
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var SUPPLIERS = {{ suppliers|tojson }};
+        var PURCHASE_ORDERS = {{ purchase_orders|tojson }};
+        var MODE = {{ mode|tojson }};
+
+        var recordForm = document.getElementById('recordForm');
+        var tbody = document.getElementById('recordsBody');
+
+        function peso(n) {
+            return '₱' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function escapeHtml(text) {
+            return String(text == null ? '' : text)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        /* ------------------------------------------------- searchable name pickers
+           Same [data-dropdown] contract as purchase_orders.html's initSearchablePicker. */
+        var searchablePanels = [];
+
+        function closeAllOtherDropdowns(exceptPanel) {
+            searchablePanels.forEach(function (p) { if (p !== exceptPanel) p.classList.add('hidden'); });
+        }
+
+        function initSearchablePicker(inputId, hiddenId, panelId, items, getId, getLabel, getOptionText) {
+            getOptionText = getOptionText || getLabel;
+            var input = document.getElementById(inputId);
+            var hidden = document.getElementById(hiddenId);
+            var panel = document.getElementById(panelId);
+            searchablePanels.push(panel);
+
+            function render(filterText) {
+                var term = (filterText || '').trim().toLowerCase();
+                var matches = items.filter(function (item) {
+                    return !term || getOptionText(item).toLowerCase().indexOf(term) !== -1;
+                });
+                panel.innerHTML = matches.length
+                    ? matches.map(function (item) {
+                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-id="'
+                            + getId(item) + '" data-name="' + getLabel(item).replace(/"/g, '&quot;') + '">' + escapeHtml(getOptionText(item)) + '</button>';
+                    }).join('')
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matches</p>';
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-id]');
+                if (!btn) return;
+                input.value = btn.getAttribute('data-name');
+                hidden.value = btn.getAttribute('data-id');
+                hidden.dispatchEvent(new Event('change'));
+                panel.classList.add('hidden');
+            });
+
+            input.addEventListener('input', function () {
+                hidden.value = '';
+                hidden.dispatchEvent(new Event('change'));
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            input.addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeAllOtherDropdowns(panel);
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+
+            return {
+                reset: function () {
+                    input.value = '';
+                    hidden.value = '';
+                    hidden.dispatchEvent(new Event('change'));
+                    render('');
+                },
+                setValue: function (id, label) {
+                    input.value = label;
+                    hidden.value = id;
+                    hidden.dispatchEvent(new Event('change'));
+                },
+            };
+        }
+
+        var supplierPicker = initSearchablePicker(
+            'supplierSearchInput', 'fieldSupplierId', 'supplierOptions', SUPPLIERS,
+            function (s) { return s.id; }, function (s) { return s.name; },
+            function (s) { return (s.code || '') + ' — ' + s.name; }
+        );
+
+        var poPicker = null;
+        if (MODE === 'po') {
+            poPicker = initSearchablePicker(
+                'poSearchInput', 'fieldPurchaseOrderId', 'poOptions', PURCHASE_ORDERS,
+                function (p) { return p.id; }, function (p) { return p.poNumber; },
+                function (p) { return p.poNumber + ' — ' + (p.supplierName || ''); }
+            );
+            // A PO Payable's supplier always follows its PO - the picker above is
+            // disabled and only ever driven from here, never typed independently.
+            document.getElementById('fieldPurchaseOrderId').addEventListener('change', function () {
+                var poId = this.value;
+                if (!poId) return;
+                var po = PURCHASE_ORDERS.find(function (p) { return String(p.id) === String(poId); });
+                if (po) supplierPicker.setValue(po.supplierId, po.supplierName || '');
+            });
+        }
+
+        /* ------------------------------------------------- live Vatable/VAT/EWT/Net preview */
+        var fieldAmount = document.getElementById('fieldAmount');
+        var fieldEwtRate = document.getElementById('fieldEwtRate');
+
+        function recomputePreview() {
+            var amount = parseFloat(fieldAmount.value);
+            var ratePct = parseFloat(fieldEwtRate.value);
+            if (!isFinite(amount) || amount <= 0) amount = 0;
+            if (!isFinite(ratePct) || ratePct < 0) ratePct = 0;
+            var vatable = amount / 1.12;
+            var vat = amount - vatable;
+            var ewt = vatable * (ratePct / 100);
+            var net = amount - ewt;
+            document.getElementById('previewVatable').textContent = peso(vatable);
+            document.getElementById('previewVat').textContent = peso(vat);
+            document.getElementById('previewEwt').textContent = peso(ewt);
+            document.getElementById('previewNet').textContent = peso(net);
+        }
+        fieldAmount.addEventListener('input', recomputePreview);
+        fieldEwtRate.addEventListener('input', recomputePreview);
+
+        /* ------------------------------------------------------------- add */
+        document.getElementById('addNewBtn').addEventListener('click', function () {
+            recordForm.reset();
+            supplierPicker.reset();
+            if (poPicker) poPicker.reset();
+            fieldEwtRate.value = '1';
+            recomputePreview();
+            OS.openModal('recordModal');
+        });
+
+        /* --------------------------------------------------------------- view */
+        function renderView(row) {
+            document.getElementById('viewSupplier').textContent = row.getAttribute('data-supplier-name') || '—';
+            document.getElementById('viewStatus').textContent = row.getAttribute('data-status') || '—';
+            document.getElementById('viewPoNumber').textContent = row.getAttribute('data-po-number') || '—';
+            document.getElementById('viewSiDr').textContent =
+                (row.getAttribute('data-si-number') || '—') + ' / ' + (row.getAttribute('data-dr-number') || '—');
+            document.getElementById('viewReference').textContent = row.getAttribute('data-reference-number') || '—';
+            document.getElementById('viewCreatedBy').textContent = row.getAttribute('data-created-by-name') || '—';
+
+            var description = row.getAttribute('data-description');
+            document.getElementById('viewDescriptionWrap').classList.toggle('hidden', !description);
+            document.getElementById('viewDescription').textContent = description || '';
+
+            document.getElementById('viewAmount').textContent = peso(row.getAttribute('data-amount'));
+            document.getElementById('viewVatable').textContent = peso(row.getAttribute('data-vatable-amount'));
+            document.getElementById('viewVat').textContent = peso(row.getAttribute('data-vat-amount'));
+            var ewtRatePct = parseFloat(row.getAttribute('data-ewt-rate')) * 100;
+            document.getElementById('viewEwtRate').textContent = (isFinite(ewtRatePct) ? ewtRatePct.toFixed(2) : '0') + '%';
+            document.getElementById('viewEwt').textContent = peso(row.getAttribute('data-ewt-amount'));
+            document.getElementById('viewNet').textContent = peso(row.getAttribute('data-net-amount'));
+
+            var verifiedBy = row.getAttribute('data-verified-by-name');
+            document.getElementById('viewVerifiedWrap').classList.toggle('hidden', !verifiedBy);
+            document.getElementById('viewVerifiedBy').textContent = verifiedBy || '';
+
+            var voucher = row.getAttribute('data-claimed-by-voucher-number');
+            document.getElementById('viewVoucherWrap').classList.toggle('hidden', !voucher);
+            document.getElementById('viewVoucher').textContent = voucher || '';
+
+            var voidReason = row.getAttribute('data-void-reason');
+            document.getElementById('viewVoidReasonWrap').classList.toggle('hidden', !voidReason);
+            document.getElementById('viewVoidReason').textContent = voidReason || '';
+
+            OS.openModal('viewModal');
+        }
+
+        /* --------------------------------------------------- verify/void action modal */
+        var actionForm = document.getElementById('actionForm');
+        var actionModalTitle = document.getElementById('actionModalTitle');
+        var actionSubmitBtn = document.getElementById('actionSubmitBtn');
+        var actionReasonWrap = document.getElementById('actionReasonWrap');
+
+        function openAction(url, isVoid) {
+            actionForm.action = url;
+            document.getElementById('actionReason').value = '';
+            actionReasonWrap.classList.toggle('hidden', !isVoid);
+            actionModalTitle.textContent = isVoid ? 'Void Payable' : 'Verify Payable';
+            actionSubmitBtn.className = 'btn ' + (isVoid ? 'btn-danger' : 'btn-primary');
+            actionSubmitBtn.innerHTML = isVoid
+                ? '<i data-lucide="ban" class="h-4 w-4"></i>Void'
+                : '<i data-lucide="check" class="h-4 w-4"></i>Verify';
+            OS.refreshIcons();
+            OS.openModal('actionModal');
+        }
+
+        tbody.addEventListener('click', function (e) {
+            var viewBtn = e.target.closest('.js-view');
+            var verifyBtn = e.target.closest('.js-verify');
+            var voidBtn = e.target.closest('.js-void');
+            if (viewBtn) renderView(viewBtn.closest('tr'));
+            if (verifyBtn) openAction(verifyBtn.getAttribute('data-url'), false);
+            if (voidBtn) openAction(voidBtn.getAttribute('data-url'), true);
+        });
+
+        /* --------------------------------------------------------------- search */
+        var searchInput = document.getElementById('paySearch');
+        searchInput.addEventListener('search', function () {
+            if (searchInput.value === '') document.getElementById('searchForm').submit();
+        });
+    })();
+</script>
+{% endblock %}

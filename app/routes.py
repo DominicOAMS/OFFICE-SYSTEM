@@ -22,12 +22,14 @@ from pymysql.err import DataError, IntegrityError
 from werkzeug.security import check_password_hash
 
 from . import (
+    check_vouchers_repo,
     customers_repo,
     fuel_approvers_repo,
     fuel_po_repo,
     fuel_prices_repo,
     inventory_items_repo,
     invoices_repo,
+    payables_repo,
     program_menu_repo,
     purchase_order_approvers_repo,
     purchase_orders_repo,
@@ -2293,6 +2295,358 @@ def invoice_void(invoice_id):
     invoices_repo.void_invoice(invoice_id, voided_by=session.get("user_id"), reason=reason)
     flash("Invoice voided.", "success")
     return redirect(url_for("main.invoices"))
+
+
+PAYABLES_PER_PAGE = 30
+VOUCHER_PER_PAGE = 30
+
+
+def _payable_for_view(payable):
+    """JSON-safe primitives for the Payable View modal, the Check Voucher Add form's
+    picker, and a voucher's linked-payables list (same shape feeds all three). The last
+    two feed from a plain `ap.*` query without the payables-list page's supplierCode/
+    claimedByVoucherNumber join, so those two are read defensively."""
+    return {
+        "id": payable["id"],
+        "purchaseOrderId": payable["purchaseOrderId"],
+        "poNumber": payable["poNumber"],
+        "supplierId": payable["supplierId"],
+        "supplierCode": payable.get("supplierCode"),
+        "payeeName": payable["payeeName"],
+        "siNumber": payable["siNumber"],
+        "drNumber": payable["drNumber"],
+        "referenceNumber": payable["referenceNumber"],
+        "description": payable["description"],
+        "amount": float(payable["amount"]),
+        "ewtRate": float(payable["ewtRate"]),
+        "ewtAmount": float(payable["ewtAmount"]),
+        "vatableAmount": float(payable["vatableAmount"]),
+        "vatAmount": float(payable["vatAmount"]),
+        "netAmount": float(payable["netAmount"]),
+        "status": payable["status"],
+        "claimedByVoucherNumber": payable.get("claimedByVoucherNumber"),
+    }
+
+
+def _parse_payable_form():
+    """Resolves the supplier (and, optionally, the PO) and snapshots payeeName/Address/Tin
+    so a payable freezes what it said - same reasoning as every other supplier/customer
+    snapshot in this app. Leaving purchaseOrderId blank is what makes this a Non-PO payable;
+    both list pages share this same parser and create route. Money is always derived from
+    amount/ewtRate here, never trusted as a typed total - the form sends ewtRate as a
+    percentage (e.g. "1" for 1%), converted to the stored fraction here."""
+    supplier_id = request.form.get("supplierId", "").strip()
+    supplier = suppliers_repo.get_supplier(int(supplier_id)) if supplier_id.isdigit() else None
+
+    po_id_raw = request.form.get("purchaseOrderId", "").strip()
+    po = purchase_orders_repo.get_purchase_order(int(po_id_raw)) if po_id_raw.isdigit() else None
+
+    amount = _parse_coordinate(request.form.get("amount", ""))
+    ewt_rate_pct = _parse_coordinate(request.form.get("ewtRate", ""))
+    if amount is not None and amount > 0 and ewt_rate_pct is not None and 0 <= ewt_rate_pct <= 100:
+        amount = Decimal(str(amount)).quantize(Decimal("0.01"))
+        ewt_rate = (Decimal(str(ewt_rate_pct)) / Decimal("100")).quantize(Decimal("0.0001"))
+        vatable_amount = (amount / Decimal("1.12")).quantize(Decimal("0.01"))
+        vat_amount = amount - vatable_amount
+        ewt_amount = (vatable_amount * ewt_rate).quantize(Decimal("0.01"))
+        net_amount = amount - ewt_amount
+    else:
+        amount = ewt_rate = vatable_amount = vat_amount = ewt_amount = net_amount = None
+
+    return {
+        "purchaseOrderId": po["id"] if po else None,
+        "poNumber": po["poNumber"] if po else None,
+        "supplierId": supplier["id"] if supplier else None,
+        "payeeName": supplier["name"] if supplier else None,
+        "payeeAddress": supplier["address"] if supplier else None,
+        "payeeTin": supplier["tin"] if supplier else None,
+        "siNumber": _clip(request.form.get("siNumber", "").strip(), limit=100) or None,
+        "drNumber": _clip(request.form.get("drNumber", "").strip(), limit=100) or None,
+        "referenceNumber": _clip(request.form.get("referenceNumber", "").strip(), limit=100) or None,
+        "description": _clip(request.form.get("description", "").strip()) or None,
+        "amount": amount,
+        "ewtRate": ewt_rate,
+        "ewtAmount": ewt_amount,
+        "vatableAmount": vatable_amount,
+        "vatAmount": vat_amount,
+        "netAmount": net_amount,
+    }
+
+
+def _po_for_picker(po):
+    """JSON-safe primitives for the Add Payable form's PO picker - just enough to search
+    and to auto-fill the supplier when one is chosen. The full PO row has Decimal/date
+    columns that |tojson can't serialize, same reason every other picker array in this app
+    (SUPPLIERS, CUSTOMERS, APPROVERS) is pre-shaped before being embedded."""
+    return {
+        "id": po["id"],
+        "poNumber": po["poNumber"],
+        "supplierId": po["supplierId"],
+        "supplierName": po["supplierName"],
+    }
+
+
+def _payables_list_page(has_po):
+    search = request.args.get("q", "").strip()
+    status = request.args.get("status", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    total = payables_repo.count_payables(search or None, status or None, has_po)
+    page_count = max(1, -(-total // PAYABLES_PER_PAGE))  # ceil
+    page = min(page, page_count)
+
+    records = payables_repo.list_payables(
+        search=search or None,
+        status=status or None,
+        has_po=has_po,
+        limit=PAYABLES_PER_PAGE,
+        offset=(page - 1) * PAYABLES_PER_PAGE,
+    )
+    return render_template(
+        "payables.html",
+        payables=records,
+        mode="po" if has_po else "non_po",
+        suppliers=suppliers_repo.list_active_suppliers(),
+        purchase_orders=(
+            [_po_for_picker(po) for po in purchase_orders_repo.list_purchase_orders(status="Approved")]
+            if has_po else []
+        ),
+        search=search,
+        status=status,
+        page=page,
+        page_count=page_count,
+        total=total,
+        per_page=PAYABLES_PER_PAGE,
+    )
+
+
+@main_bp.route("/page/payables_po")
+@login_required
+def payables_po():
+    return _payables_list_page(has_po=True)
+
+
+@main_bp.route("/page/payables_non_po")
+@login_required
+def payables_non_po():
+    return _payables_list_page(has_po=False)
+
+
+@main_bp.route("/page/payables_po/add", methods=["POST"])
+@main_bp.route("/page/payables_non_po/add", methods=["POST"])
+@login_required
+def payable_add():
+    data = _parse_payable_form()
+    fallback = url_for("main.payables_po" if data["purchaseOrderId"] else "main.payables_non_po")
+    if not data["supplierId"]:
+        flash("Choose a supplier before saving.", "error")
+        return redirect(fallback)
+    if data["amount"] is None:
+        flash("Enter a valid amount and an EWT rate between 0 and 100%.", "error")
+        return redirect(fallback)
+    try:
+        payable_id = payables_repo.create_payable(data, created_by=session.get("user_id"))
+    except (IntegrityError, DataError):
+        flash("Could not save — one of the selected records no longer exists, or a value was too long to save.", "error")
+        return redirect(fallback)
+    flash(f"Payable #{payable_id} created.", "success")
+    return redirect(fallback)
+
+
+@main_bp.route("/page/payables/<int:payable_id>/verify", methods=["POST"])
+@login_required
+def payable_verify(payable_id):
+    payable = payables_repo.get_payable(payable_id)
+    if not payable:
+        abort(404)
+    # Second pair of eyes on the delivery match, same "blocks the creator" rule as
+    # Warehouse Transactions' Verify - this is confirming a past delivery happened, not
+    # authorizing a future spend, so it's the closer analog here than PO's approve/reject.
+    if payable["status"] != "Created" or payable["createdBy"] == session.get("user_id"):
+        abort(403)
+    payables_repo.verify(payable_id, verified_by=session.get("user_id"))
+    flash(f"Payable #{payable_id} verified.", "success")
+    return redirect(url_for("main.payables_po" if payable["purchaseOrderId"] else "main.payables_non_po"))
+
+
+@main_bp.route("/page/payables/<int:payable_id>/void", methods=["POST"])
+@login_required
+def payable_void(payable_id):
+    payable = payables_repo.get_payable(payable_id)
+    if not payable:
+        abort(404)
+    # Blocked once Paid (money's moved) and blocked while a non-Void voucher still claims
+    # it - void the voucher first (which frees this payable again), don't void underneath it.
+    if (
+        payable["createdBy"] != session.get("user_id")
+        or payable["status"] not in ("Created", "Verified")
+        or payable["claimedByVoucherNumber"]
+    ):
+        abort(403)
+    reason = request.form.get("reason", "").strip()[:255] or None
+    payables_repo.void(payable_id, voided_by=session.get("user_id"), reason=reason)
+    flash(f"Payable #{payable_id} voided.", "success")
+    return redirect(url_for("main.payables_po" if payable["purchaseOrderId"] else "main.payables_non_po"))
+
+
+def _parse_voucher_form():
+    """A voucher's payee is derived entirely from the selected supplier - every payable it
+    claims must belong to that same supplier (create_voucher re-validates this with a row
+    lock at submit time), so payeeName/Address/Tin are snapshotted from the supplier here
+    rather than typed. Totals are NOT computed here - they're summed server-side from the
+    selected payables' own stored breakdown inside create_voucher, since a voucher is never
+    edited after creation and must reconcile exactly with what it claims."""
+    supplier_id = request.form.get("supplierId", "").strip()
+    supplier = suppliers_repo.get_supplier(int(supplier_id)) if supplier_id.isdigit() else None
+
+    payable_ids = [
+        int(raw_id.strip())
+        for raw_id in request.form.getlist("payableIds")
+        if raw_id.strip().isdigit()
+    ]
+
+    return {
+        "supplierId": supplier["id"] if supplier else None,
+        "payeeName": supplier["name"] if supplier else None,
+        "payeeAddress": supplier["address"] if supplier else None,
+        "payeeTin": supplier["tin"] if supplier else None,
+        "voucherDate": request.form.get("voucherDate", "").strip() or None,
+        "dueDate": request.form.get("dueDate", "").strip() or None,
+        "remarksHeading": _clip(request.form.get("remarksHeading", "").strip(), limit=100) or None,
+        "remarks": _clip(request.form.get("remarks", "").strip()) or None,
+        "payableIds": payable_ids,
+    }
+
+
+@main_bp.route("/page/payables_vouchers")
+@login_required
+def check_vouchers():
+    search = request.args.get("q", "").strip()
+    status = request.args.get("status", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    total = check_vouchers_repo.count_vouchers(search or None, status or None)
+    page_count = max(1, -(-total // VOUCHER_PER_PAGE))  # ceil
+    page = min(page, page_count)
+
+    records = check_vouchers_repo.list_vouchers(
+        search=search or None,
+        status=status or None,
+        limit=VOUCHER_PER_PAGE,
+        offset=(page - 1) * VOUCHER_PER_PAGE,
+    )
+    voucher_ids = [r["id"] for r in records]
+    payables_by_voucher = {
+        voucher_id: [_payable_for_view(p) for p in payables]
+        for voucher_id, payables in check_vouchers_repo.list_payables_for_vouchers(voucher_ids).items()
+    }
+    return render_template(
+        "check_vouchers.html",
+        vouchers=records,
+        payables_by_voucher=payables_by_voucher,
+        suppliers=suppliers_repo.list_active_suppliers(),
+        search=search,
+        status=status,
+        page=page,
+        page_count=page_count,
+        total=total,
+        per_page=VOUCHER_PER_PAGE,
+    )
+
+
+@main_bp.route("/page/payables_vouchers/payables")
+@login_required
+def voucher_payables_picker():
+    """Feeds the Check Voucher Add form's picker: a supplier's Verified payables not
+    already claimed by another non-Void voucher."""
+    supplier_id = request.args.get("supplierId", "").strip()
+    if not supplier_id.isdigit():
+        return jsonify([])
+    payables = payables_repo.list_unclaimed_verified_for_supplier(int(supplier_id))
+    return jsonify([_payable_for_view(p) for p in payables])
+
+
+@main_bp.route("/page/payables_vouchers/add", methods=["POST"])
+@login_required
+def voucher_add():
+    data = _parse_voucher_form()
+    if not data["supplierId"] or not data["payableIds"]:
+        flash("Choose a supplier and at least one payable to pay.", "error")
+        return redirect(url_for("main.check_vouchers"))
+    try:
+        voucher_id, voucher_number = check_vouchers_repo.create_voucher(
+            data, created_by=session.get("user_id")
+        )
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("main.check_vouchers"))
+    except (IntegrityError, DataError):
+        flash("Could not save — one of the selected records no longer exists, or a value was too long to save.", "error")
+        return redirect(url_for("main.check_vouchers"))
+    flash(f"Voucher {voucher_number} prepared.", "success")
+    return redirect(url_for("main.check_vouchers"))
+
+
+@main_bp.route("/page/payables_vouchers/<int:voucher_id>/check", methods=["POST"])
+@login_required
+def voucher_check(voucher_id):
+    voucher = check_vouchers_repo.get_voucher(voucher_id)
+    if not voucher:
+        abort(404)
+    if voucher["status"] != "Prepared" or voucher["createdBy"] == session.get("user_id"):
+        abort(403)
+    check_vouchers_repo.mark_checked(voucher_id, checked_by=session.get("user_id"))
+    flash(f"Voucher {voucher['voucherNumber']} checked.", "success")
+    return redirect(url_for("main.check_vouchers"))
+
+
+@main_bp.route("/page/payables_vouchers/<int:voucher_id>/approve", methods=["POST"])
+@login_required
+def voucher_approve(voucher_id):
+    voucher = check_vouchers_repo.get_voucher(voucher_id)
+    if not voucher:
+        abort(404)
+    # Only excludes the creator, not also whoever Checked it - the same second person could
+    # Check and then Approve. Flagged in the plan for review; tighten here if that's wrong.
+    if voucher["status"] != "Checked" or voucher["createdBy"] == session.get("user_id"):
+        abort(403)
+    check_vouchers_repo.mark_approved(voucher_id, approved_by=session.get("user_id"))
+    flash(f"Voucher {voucher['voucherNumber']} approved.", "success")
+    return redirect(url_for("main.check_vouchers"))
+
+
+@main_bp.route("/page/payables_vouchers/<int:voucher_id>/pay", methods=["POST"])
+@login_required
+def voucher_pay(voucher_id):
+    voucher = check_vouchers_repo.get_voucher(voucher_id)
+    if not voucher:
+        abort(404)
+    if voucher["status"] != "Approved" or voucher["createdBy"] == session.get("user_id"):
+        abort(403)
+    check_number = _clip(request.form.get("checkNumber", "").strip(), limit=100) or None
+    check_vouchers_repo.mark_paid(voucher_id, paid_by=session.get("user_id"), check_number=check_number)
+    flash(f"Voucher {voucher['voucherNumber']} paid — linked payables marked Paid.", "success")
+    return redirect(url_for("main.check_vouchers"))
+
+
+@main_bp.route("/page/payables_vouchers/<int:voucher_id>/void", methods=["POST"])
+@login_required
+def voucher_void(voucher_id):
+    voucher = check_vouchers_repo.get_voucher(voucher_id)
+    if not voucher:
+        abort(404)
+    if voucher["createdBy"] != session.get("user_id") or voucher["status"] in ("Void", "Paid"):
+        abort(403)
+    reason = request.form.get("reason", "").strip()[:255] or None
+    check_vouchers_repo.void(voucher_id, voided_by=session.get("user_id"), reason=reason)
+    flash(f"Voucher {voucher['voucherNumber']} voided.", "success")
+    return redirect(url_for("main.check_vouchers"))
 
 
 @main_bp.route("/page/<slug>")
