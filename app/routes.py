@@ -3184,6 +3184,16 @@ def delivery_gatepass_void(gatepass_id):
     return redirect(url_for("main.delivery_gatepass"))
 
 
+def _dr_for_calendar_view(d):
+    """JSON-safe primitives for the Schedules calendar's per-day click-through modal."""
+    return {
+        "id": d["id"],
+        "drNumber": d["drNumber"],
+        "deliveredTo": d["deliveredTo"],
+        "status": d["status"],
+    }
+
+
 @main_bp.route("/page/delivery_schedules")
 @login_required
 def delivery_schedules():
@@ -3199,13 +3209,18 @@ def delivery_schedules():
     prev_year, prev_month = (year - 1, 12) if month == 1 else (year, month - 1)
     next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
 
+    deliveries_by_day = {
+        day: [_dr_for_calendar_view(d) for d in drs]
+        for day, drs in delivery_schedule.get_calendar_month(year, month).items()
+    }
+
     return render_template(
         "delivery_schedules.html",
         year=year,
         month=month,
         month_name=date(year, month, 1).strftime("%B"),
         weeks=delivery_schedule.month_grid(year, month),
-        deliveries_by_day=delivery_schedule.get_calendar_month(year, month),
+        deliveries_by_day=deliveries_by_day,
         awaiting=delivery_schedule.list_invoices_awaiting_delivery(),
         today=today,
         prev_year=prev_year,

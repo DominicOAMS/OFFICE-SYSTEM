@@ -46,19 +46,34 @@
                         {% for week in weeks %}
                         <tr>
                             {% for day in week %}
-                            <td class="h-24 min-w-[6rem] align-top border border-slate-100 p-1.5 dark:border-slate-800
+                            {% set day_deliveries = deliveries_by_day.get(day, []) %}
+                            <td class="h-24 min-w-[6rem] border border-slate-100 p-0 align-top dark:border-slate-800
                                        {{ 'bg-brand-50/50 dark:bg-brand-500/5' if day and day == today.day and month == today.month and year == today.year }}">
                                 {% if day %}
-                                <p class="mb-1 text-xs font-medium text-slate-400 dark:text-slate-500">{{ day }}</p>
-                                {% for d in deliveries_by_day.get(day, [])[:3] %}
-                                <p class="mb-0.5 truncate rounded bg-brand-50 px-1.5 py-0.5 text-[11px] text-brand-700
-                                          dark:bg-brand-500/10 dark:text-brand-300" title="{{ d.deliveredTo or '' }}">
-                                    #{{ d.drNumber }} — {{ d.deliveredTo or '—' }}
-                                </p>
-                                {% endfor %}
-                                {% if deliveries_by_day.get(day, [])|length > 3 %}
-                                <p class="text-[11px] text-slate-400">+{{ deliveries_by_day.get(day, [])|length - 3 }} more</p>
-                                {% endif %}
+                                <button type="button"
+                                        class="js-day-cell flex h-full w-full flex-col items-start p-1.5 text-left transition
+                                               {{ 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50' if day_deliveries else 'cursor-default' }}"
+                                        data-day="{{ day }}"
+                                        {# single-quoted: Flask's tojson escapes < > & ' but not ",
+                                           and JSON is full of " - see purchase_orders.html's data-items #}
+                                        data-deliveries='{{ day_deliveries|tojson }}'
+                                        {{ 'disabled' if not day_deliveries }}>
+                                    <span class="mb-1 flex w-full items-center justify-between gap-1">
+                                        <span class="text-xs font-medium text-slate-400 dark:text-slate-500">{{ day }}</span>
+                                        {% if day_deliveries %}
+                                        <span class="badge badge-slate shrink-0 px-1.5 py-0 text-[10px]">{{ day_deliveries|length }}</span>
+                                        {% endif %}
+                                    </span>
+                                    {% for d in day_deliveries[:3] %}
+                                    <span class="mb-0.5 block w-full truncate rounded bg-brand-50 px-1.5 py-0.5 text-[11px] text-brand-700
+                                                 dark:bg-brand-500/10 dark:text-brand-300">
+                                        #{{ d.drNumber }} — {{ d.deliveredTo or '—' }}
+                                    </span>
+                                    {% endfor %}
+                                    {% if day_deliveries|length > 3 %}
+                                    <span class="text-[11px] text-slate-400">+{{ day_deliveries|length - 3 }} more</span>
+                                    {% endif %}
+                                </button>
                                 {% endif %}
                             </td>
                             {% endfor %}
@@ -94,4 +109,63 @@
         </div>
     </div>
 </div>
+
+<!-- ===================== Day details modal ===================== -->
+<div id="dayModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <div class="modal-header">
+            <h3 class="modal-title" id="dayModalTitle">Deliveries</h3>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div id="dayModalList" class="space-y-2"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var escapeHtml = Pickers.escapeHtml;
+        var STATUS_TONE = { Created: 'badge-slate', Printed: 'badge-brand', Finished: 'badge-success', Void: 'badge-accent' };
+
+        var dayModalTitle = document.getElementById('dayModalTitle');
+        var dayModalList = document.getElementById('dayModalList');
+
+        function openDay(button) {
+            var day = button.getAttribute('data-day');
+            var deliveries = [];
+            try {
+                deliveries = JSON.parse(button.getAttribute('data-deliveries') || '[]');
+            } catch (err) {
+                deliveries = [];
+            }
+            dayModalTitle.textContent = '{{ month_name }} ' + day + ' — Deliveries';
+            dayModalList.innerHTML = deliveries.map(function (d) {
+                var tone = STATUS_TONE[d.status] || 'badge-slate';
+                return '<a href="{{ url_for("main.delivery_receipt") }}?q=' + encodeURIComponent(d.drNumber)
+                    + '" class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm transition '
+                    + 'hover:border-brand-300 hover:bg-brand-50/50 dark:border-slate-700 dark:hover:border-brand-500/40 dark:hover:bg-brand-500/5">'
+                    + '<span class="min-w-0">'
+                    + '<span class="block truncate font-medium text-slate-800 dark:text-slate-100">#' + escapeHtml(d.drNumber) + ' — ' + escapeHtml(d.deliveredTo || '—') + '</span>'
+                    + '</span>'
+                    + '<span class="badge ' + tone + ' shrink-0">' + escapeHtml(d.status) + '</span>'
+                    + '</a>';
+            }).join('');
+            OS.openModal('dayModal');
+            OS.refreshIcons();
+        }
+
+        document.querySelectorAll('.js-day-cell').forEach(function (btn) {
+            if (btn.disabled) return;
+            btn.addEventListener('click', function () { openDay(btn); });
+        });
+    })();
+</script>
 {% endblock %}
