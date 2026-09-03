@@ -21,8 +21,8 @@
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {% set stat_cards = [
             ('Invoices This Month', stats.invoices_this_month|string, 'file-text', 'brand', 'Issued since the 1st'),
-            ('Outstanding Receivables', stats.outstanding_receivables_count|string, 'hand-coins', 'accent', 'Invoices not yet Paid or Void'),
-            ('Outstanding Payables', stats.outstanding_payables_count|string, 'wallet', 'brand', 'Verified, awaiting a check'),
+            ('Unpaid Invoices', stats.outstanding_receivables_count|string, 'hand-coins', 'accent', 'Not yet Paid or Void'),
+            ('Unpaid Bills', stats.outstanding_payables_count|string, 'wallet', 'brand', 'Verified, awaiting a check'),
             ('Active Stock Items', stats.active_stock_items|string, 'boxes', 'accent', 'Tracked in the inventory master')
         ] %}
         {% for label, value, icon, tone, caption in stat_cards %}
