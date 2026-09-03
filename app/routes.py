@@ -26,9 +26,12 @@ from . import (
     collections_repo,
     customers_repo,
     dashboard_stats,
+    delivery_receipts_repo,
+    delivery_schedule,
     fuel_approvers_repo,
     fuel_po_repo,
     fuel_prices_repo,
+    gatepasses_repo,
     inventory_items_repo,
     invoices_repo,
     payables_repo,
@@ -2920,6 +2923,296 @@ def reports_export(dataset_key):
     date_from = _parse_report_date(request.args.get("from"))
     date_to = _parse_report_date(request.args.get("to"))
     return reports.build_csv(dataset_key, search, status, date_from, date_to)
+
+
+DELIVERY_RECEIPT_PER_PAGE = 30
+DELIVERY_GATEPASS_PER_PAGE = 30
+MAX_DELIVERY_RECEIPT_ITEMS = 50
+
+
+def _dr_item_for_view(item):
+    """JSON-safe primitives for the Delivery Receipt View modal's line-item breakdown."""
+    return {
+        "itemId": item["itemId"],
+        "catalogCode": item["catalogCode"],
+        "description": item["description"],
+        "unit": item["unit"],
+        "category": item["category"],
+        "quantity": float(item["quantity"]) if item["quantity"] is not None else None,
+        "lot": item["lot"],
+        "expiryDate": item["expiryDate"].isoformat() if item["expiryDate"] else None,
+        "customerPo": item["customerPo"],
+    }
+
+
+def _parse_delivery_receipt_items(raw_json):
+    """Same 'drop, don't patch' rule as every other line-item parser - a line with no
+    description or no positive quantity is dropped. No pack-size/box toggle here (unlike
+    Warehouse Transactions/Invoices) - legacy DR data is flat quantity+unit, no box
+    conversion concept to carry forward."""
+    try:
+        parsed = json.loads(raw_json or "[]")
+    except ValueError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+
+    items = []
+    for entry in parsed[:MAX_DELIVERY_RECEIPT_ITEMS]:
+        if not isinstance(entry, dict):
+            continue
+        description = _clip((entry.get("description") or "").strip())
+        raw_quantity = _parse_coordinate(str(entry.get("quantity", "")))
+        item_id_raw = str(entry.get("itemId", "")).strip()
+        item_id = int(item_id_raw) if item_id_raw.isdigit() else None
+        if not description or raw_quantity is None or raw_quantity <= 0:
+            continue
+
+        items.append(
+            {
+                "itemId": item_id,
+                "catalogCode": _clip((entry.get("catalogCode") or "").strip()) or None,
+                "description": description,
+                "unit": _clip((entry.get("unit") or "").strip(), limit=30) or None,
+                "category": _clip((entry.get("category") or "").strip(), limit=50) or None,
+                "quantity": Decimal(str(raw_quantity)),
+                "lot": _clip((entry.get("lot") or "").strip(), limit=50) or None,
+                "expiryDate": (entry.get("expiryDate") or "").strip() or None,
+                "customerPo": _clip((entry.get("customerPo") or "").strip(), limit=100) or None,
+            }
+        )
+    return items
+
+
+def _parse_delivery_receipt_form():
+    """Resolves the customer and snapshots deliveredTo/tin so a delivery receipt freezes
+    what it said, same reasoning as create_purchase_order's supplier snapshot. Address
+    stays a typed field since a delivery address legitimately varies receipt to receipt,
+    same call Invoices made for the same reason."""
+    customer_id = request.form.get("customerId", "").strip()
+    customer = customers_repo.get_customer(int(customer_id)) if customer_id.isdigit() else None
+
+    return {
+        "customerId": customer["id"] if customer else None,
+        "customerCode": customer["code"] if customer else None,
+        "deliveredTo": customer["name"] if customer else None,
+        "tin": customer["tin"] if customer else None,
+        "address": _clip(request.form.get("address", "").strip()) or None,
+        "deliveryDate": request.form.get("deliveryDate", "").strip() or None,
+        "customerPo": _clip(request.form.get("customerPo", "").strip(), limit=100) or None,
+        "terms": _clip(request.form.get("terms", "").strip(), limit=100) or None,
+        "branch": _clip(request.form.get("branch", "").strip(), limit=100) or None,
+        "notes": _clip(request.form.get("notes", "").strip()) or None,
+        "items": _parse_delivery_receipt_items(request.form.get("itemsJson")),
+    }
+
+
+@main_bp.route("/page/delivery_receipt")
+@login_required
+def delivery_receipt():
+    search = request.args.get("q", "").strip()
+    status = request.args.get("status", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    total = delivery_receipts_repo.count_delivery_receipts(search or None, status or None)
+    page_count = max(1, -(-total // DELIVERY_RECEIPT_PER_PAGE))  # ceil
+    page = min(page, page_count)
+
+    records = delivery_receipts_repo.list_delivery_receipts(
+        search=search or None,
+        status=status or None,
+        limit=DELIVERY_RECEIPT_PER_PAGE,
+        offset=(page - 1) * DELIVERY_RECEIPT_PER_PAGE,
+    )
+    dr_ids = [r["id"] for r in records]
+    items_by_dr = {
+        dr_id: [_dr_item_for_view(i) for i in items]
+        for dr_id, items in delivery_receipts_repo.list_items_for_delivery_receipts(dr_ids).items()
+    }
+    return render_template(
+        "delivery_receipt.html",
+        delivery_receipts=records,
+        items_by_dr=items_by_dr,
+        customers=customers_repo.list_active_customers(),
+        inventory_items=purchase_orders_repo.list_active_inventory_items(),
+        search=search,
+        status=status,
+        page=page,
+        page_count=page_count,
+        total=total,
+        per_page=DELIVERY_RECEIPT_PER_PAGE,
+    )
+
+
+@main_bp.route("/page/delivery_receipt/add", methods=["POST"])
+@login_required
+def delivery_receipt_add():
+    data = _parse_delivery_receipt_form()
+    if not data["customerId"] or not data["items"]:
+        flash("Choose a customer and add at least one line item.", "error")
+        return redirect(url_for("main.delivery_receipt"))
+    try:
+        dr_id, dr_number = delivery_receipts_repo.create_delivery_receipt(
+            data, created_by=session.get("user_id")
+        )
+    except (IntegrityError, DataError):
+        flash("Could not save — one of the selected records no longer exists, or a value was too long to save.", "error")
+        return redirect(url_for("main.delivery_receipt"))
+    flash(f"Delivery Receipt #{dr_number} created.", "success")
+    return redirect(url_for("main.delivery_receipt"))
+
+
+@main_bp.route("/page/delivery_receipt/<int:dr_id>/print", methods=["POST"])
+@login_required
+def delivery_receipt_print(dr_id):
+    dr = delivery_receipts_repo.get_delivery_receipt(dr_id)
+    if not dr:
+        abort(404)
+    # No creator restriction - printing is a mechanical act, not a second-person control,
+    # same as invoice_print.
+    if dr["status"] != "Created":
+        abort(403)
+    delivery_receipts_repo.mark_printed(dr_id, printed_by=session.get("user_id"))
+    flash("Delivery Receipt marked as printed.", "success")
+    return redirect(url_for("main.delivery_receipt"))
+
+
+@main_bp.route("/page/delivery_receipt/<int:dr_id>/finish", methods=["POST"])
+@login_required
+def delivery_receipt_finish(dr_id):
+    dr = delivery_receipts_repo.get_delivery_receipt(dr_id)
+    if not dr:
+        abort(404)
+    if dr["status"] != "Printed":
+        abort(403)
+    delivery_receipts_repo.mark_finished(dr_id, finished_by=session.get("user_id"))
+    flash("Delivery Receipt marked as finished.", "success")
+    return redirect(url_for("main.delivery_receipt"))
+
+
+@main_bp.route("/page/delivery_receipt/<int:dr_id>/void", methods=["POST"])
+@login_required
+def delivery_receipt_void(dr_id):
+    dr = delivery_receipts_repo.get_delivery_receipt(dr_id)
+    if not dr:
+        abort(404)
+    # Allowed even once Finished (mirrors Warehouse Transactions' own Void rule, not
+    # Invoices' stricter "blocked once terminal" one) - blocked only if already Void.
+    if dr["createdBy"] != session.get("user_id") or dr["status"] == "Void":
+        abort(403)
+    reason = request.form.get("reason", "").strip()[:255] or None
+    delivery_receipts_repo.void(dr_id, voided_by=session.get("user_id"), reason=reason)
+    flash("Delivery Receipt voided.", "success")
+    return redirect(url_for("main.delivery_receipt"))
+
+
+def _parse_gatepass_form():
+    return {
+        "deliveryStaff": _clip(request.form.get("deliveryStaff", "").strip(), limit=100) or None,
+        "transDate": request.form.get("transDate", "").strip() or None,
+        "transTime": request.form.get("transTime", "").strip() or None,
+        "temperature": _clip(request.form.get("temperature", "").strip(), limit=20) or None,
+        "invoicesText": _clip(request.form.get("invoicesText", "").strip()) or None,
+        "submittedBy": _clip(request.form.get("submittedBy", "").strip(), limit=100) or None,
+        "checkedBy": _clip(request.form.get("checkedBy", "").strip(), limit=100) or None,
+        "notes": _clip(request.form.get("notes", "").strip()) or None,
+    }
+
+
+@main_bp.route("/page/delivery_gatepass")
+@login_required
+def delivery_gatepass():
+    search = request.args.get("q", "").strip()
+    status = request.args.get("status", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    total = gatepasses_repo.count_gatepasses(search or None, status or None)
+    page_count = max(1, -(-total // DELIVERY_GATEPASS_PER_PAGE))  # ceil
+    page = min(page, page_count)
+
+    records = gatepasses_repo.list_gatepasses(
+        search=search or None,
+        status=status or None,
+        limit=DELIVERY_GATEPASS_PER_PAGE,
+        offset=(page - 1) * DELIVERY_GATEPASS_PER_PAGE,
+    )
+    return render_template(
+        "delivery_gatepass.html",
+        gatepasses=records,
+        search=search,
+        status=status,
+        page=page,
+        page_count=page_count,
+        total=total,
+        per_page=DELIVERY_GATEPASS_PER_PAGE,
+    )
+
+
+@main_bp.route("/page/delivery_gatepass/add", methods=["POST"])
+@login_required
+def delivery_gatepass_add():
+    data = _parse_gatepass_form()
+    if not data["deliveryStaff"]:
+        flash("Enter who the delivery staff is.", "error")
+        return redirect(url_for("main.delivery_gatepass"))
+    try:
+        gatepasses_repo.create_gatepass(data, created_by=session.get("user_id"))
+    except (IntegrityError, DataError):
+        flash("Could not save — a value was too long to save.", "error")
+        return redirect(url_for("main.delivery_gatepass"))
+    flash("Gatepass recorded.", "success")
+    return redirect(url_for("main.delivery_gatepass"))
+
+
+@main_bp.route("/page/delivery_gatepass/<int:gatepass_id>/void", methods=["POST"])
+@login_required
+def delivery_gatepass_void(gatepass_id):
+    gatepass = gatepasses_repo.get_gatepass(gatepass_id)
+    if not gatepass:
+        abort(404)
+    if gatepass["createdBy"] != session.get("user_id") or gatepass["status"] == "Void":
+        abort(403)
+    reason = request.form.get("reason", "").strip()[:255] or None
+    gatepasses_repo.void(gatepass_id, voided_by=session.get("user_id"), reason=reason)
+    flash("Gatepass voided.", "success")
+    return redirect(url_for("main.delivery_gatepass"))
+
+
+@main_bp.route("/page/delivery_schedules")
+@login_required
+def delivery_schedules():
+    today = date.today()
+    try:
+        year = int(request.args.get("year", today.year))
+        month = int(request.args.get("month", today.month))
+        if not (1 <= month <= 12):
+            raise ValueError
+    except ValueError:
+        year, month = today.year, today.month
+
+    prev_year, prev_month = (year - 1, 12) if month == 1 else (year, month - 1)
+    next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
+
+    return render_template(
+        "delivery_schedules.html",
+        year=year,
+        month=month,
+        month_name=date(year, month, 1).strftime("%B"),
+        weeks=delivery_schedule.month_grid(year, month),
+        deliveries_by_day=delivery_schedule.get_calendar_month(year, month),
+        awaiting=delivery_schedule.list_invoices_awaiting_delivery(),
+        today=today,
+        prev_year=prev_year,
+        prev_month=prev_month,
+        next_year=next_year,
+        next_month=next_month,
+    )
 
 
 @main_bp.route("/page/<slug>")

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Delivery Schedules - Office System{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="calendar-days" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Delivery Schedules</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    When Delivery Receipts went out (or are dated for), plus invoices still waiting on one.
+                </p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <a href="{{ url_for('main.delivery_schedules', year=prev_year, month=prev_month) }}" class="btn btn-secondary btn-sm">
+                <i data-lucide="chevron-left" class="h-3.5 w-3.5"></i>Prev
+            </a>
+            <span class="px-2 text-sm font-semibold text-slate-900 dark:text-white">{{ month_name }} {{ year }}</span>
+            <a href="{{ url_for('main.delivery_schedules', year=next_year, month=next_month) }}" class="btn btn-secondary btn-sm">
+                Next<i data-lucide="chevron-right" class="h-3.5 w-3.5"></i>
+            </a>
+            <a href="{{ url_for('main.delivery_schedules') }}" class="btn btn-secondary btn-sm">Today</a>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div class="card overflow-hidden lg:col-span-2">
+            <div class="overflow-x-auto">
+                <table class="w-full min-w-[42rem] table-fixed border-collapse">
+                    <thead class="bg-slate-50 dark:bg-slate-800/50">
+                        <tr>
+                            {% for day_label in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+                            <th class="table-th text-center">{{ day_label }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for week in weeks %}
+                        <tr>
+                            {% for day in week %}
+                            <td class="h-24 min-w-[6rem] align-top border border-slate-100 p-1.5 dark:border-slate-800
+                                       {{ 'bg-brand-50/50 dark:bg-brand-500/5' if day and day == today.day and month == today.month and year == today.year }}">
+                                {% if day %}
+                                <p class="mb-1 text-xs font-medium text-slate-400 dark:text-slate-500">{{ day }}</p>
+                                {% for d in deliveries_by_day.get(day, [])[:3] %}
+                                <p class="mb-0.5 truncate rounded bg-brand-50 px-1.5 py-0.5 text-[11px] text-brand-700
+                                          dark:bg-brand-500/10 dark:text-brand-300" title="{{ d.deliveredTo or '' }}">
+                                    #{{ d.drNumber }} — {{ d.deliveredTo or '—' }}
+                                </p>
+                                {% endfor %}
+                                {% if deliveries_by_day.get(day, [])|length > 3 %}
+                                <p class="text-[11px] text-slate-400">+{{ deliveries_by_day.get(day, [])|length - 3 }} more</p>
+                                {% endif %}
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <i data-lucide="clock" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                    Awaiting Delivery
+                </h2>
+                <span class="badge badge-slate">{{ awaiting|length }}</span>
+            </div>
+            <div class="max-h-[28rem] space-y-1 overflow-y-auto p-2">
+                {% for inv in awaiting %}
+                <div class="rounded-lg px-3 py-2 text-sm">
+                    <p class="truncate font-medium text-slate-800 dark:text-slate-100">{{ inv.soldTo or '—' }}</p>
+                    <p class="truncate text-xs text-slate-500 dark:text-slate-400">
+                        Invoice {{ inv.invoiceNumber }}{{ ' · ' + inv.invoiceDate|string if inv.invoiceDate else '' }}
+                    </p>
+                </div>
+                {% else %}
+                <p class="px-3 py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+                    Nothing Printed and waiting on a delivery right now.
+                </p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

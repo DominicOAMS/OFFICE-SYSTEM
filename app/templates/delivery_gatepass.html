@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+
+{% block title %}Gatepass - Office System{% endblock %}
+
+{% block content %}
+{% set STATUS_TONE = {
+    'Created': 'badge-success',
+    'Void': 'badge-accent'
+} %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="door-open" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Gatepass</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    The warehouse exit log — who left, cold-chain temperature, what's going out.
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Record Gatepass
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="door-open" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Gatepass Log
+            </h2>
+            <div class="flex items-center gap-2">
+                <form method="GET" action="{{ url_for('main.delivery_gatepass') }}" class="relative" id="searchForm">
+                    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" id="gatepassSearch" value="{{ search }}"
+                           placeholder="Search staff, invoice/DR #…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </form>
+                <span class="badge badge-slate whitespace-nowrap">{{ '{:,}'.format(total) }} shown</span>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+            {% for value, label in [('', 'All'), ('Created', 'Created'), ('Void', 'Void')] %}
+            <a href="{{ url_for('main.delivery_gatepass', q=search or None, status=value or None) }}"
+               class="badge {{ 'bg-accent-600 text-white ring-0' if status == value else 'badge-slate' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[56rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th w-32">Date / Time</th>
+                        <th class="table-th">Delivery Staff</th>
+                        <th class="table-th w-24">Temp</th>
+                        <th class="table-th">Invoices / DR</th>
+                        <th class="table-th w-28">Status</th>
+                        <th class="table-th w-24 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for g in gatepasses %}
+                    <tr class="table-row"
+                        data-id="{{ g.id }}"
+                        data-delivery-staff="{{ g.deliveryStaff or '—' }}"
+                        data-trans-date="{{ g.transDate or '' }}"
+                        data-trans-time="{{ g.transTime or '' }}"
+                        data-temperature="{{ g.temperature or '' }}"
+                        data-invoices-text="{{ g.invoicesText or '' }}"
+                        data-submitted-by="{{ g.submittedBy or '' }}"
+                        data-checked-by="{{ g.checkedBy or '' }}"
+                        data-notes="{{ g.notes or '' }}"
+                        data-status="{{ g.status }}"
+                        data-created-by-name="{{ g.createdByName or '' }}"
+                        data-void-reason="{{ g.voidReason or '' }}">
+                        <td class="table-td text-sm">{{ g.transDate or '—' }} {{ g.transTime or '' }}</td>
+                        <td class="table-td truncate">{{ g.deliveryStaff or '—' }}</td>
+                        <td class="table-td text-sm">{{ g.temperature or '—' }}</td>
+                        <td class="table-td truncate text-xs text-slate-500 dark:text-slate-400">{{ g.invoicesText or '—' }}</td>
+                        <td class="table-td">
+                            <span class="badge {{ STATUS_TONE.get(g.status, 'badge-slate') }}">{{ g.status }}</span>
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-view" title="View" aria-label="View Gatepass">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                                {% if g.createdBy == session.get('user_id') and g.status != 'Void' %}
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-void"
+                                        data-url="{{ url_for('main.delivery_gatepass_void', gatepass_id=g.id) }}" title="Void">
+                                    <i data-lucide="ban" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="door-open" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No gatepass entries match your filters</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {{ render_pagination(
+            'main.delivery_gatepass', page, page_count, total, per_page,
+            {'q': search or None, 'status': status or None}
+        ) }}
+    </div>
+</div>
+
+<!-- ===================== Record Gatepass modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <form id="recordForm" method="POST" action="{{ url_for('main.delivery_gatepass_add') }}">
+            <div class="modal-header">
+                <h3 class="modal-title">Record Gatepass</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="modal-body space-y-4">
+                <div>
+                    <label class="label" for="fieldDeliveryStaff">Delivery Staff <span class="text-accent-600">*</span></label>
+                    <input type="text" class="input" id="fieldDeliveryStaff" name="deliveryStaff" required>
+                </div>
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label class="label" for="fieldTransDate">Date</label>
+                        <input type="date" class="input" id="fieldTransDate" name="transDate">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldTransTime">Time</label>
+                        <input type="time" class="input" id="fieldTransTime" name="transTime">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldTemperature">Temperature</label>
+                        <input type="text" class="input" id="fieldTemperature" name="temperature" placeholder="e.g. 20/-12">
+                    </div>
+                </div>
+                <div>
+                    <label class="label" for="fieldInvoicesText">Invoices / DR # going out</label>
+                    <textarea class="input" id="fieldInvoicesText" name="invoicesText" rows="2" placeholder="SI.NO. ... / DR.NO. ..."></textarea>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label" for="fieldSubmittedBy">Submitted By</label>
+                        <input type="text" class="input" id="fieldSubmittedBy" name="submittedBy">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldCheckedBy">Checked By</label>
+                        <input type="text" class="input" id="fieldCheckedBy" name="checkedBy">
+                    </div>
+                </div>
+                <div>
+                    <label class="label" for="fieldNotes">Notes</label>
+                    <textarea class="input" id="fieldNotes" name="notes" rows="2"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i data-lucide="send" class="h-4 w-4"></i>Record Gatepass
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== View detail modal ===================== -->
+<div id="viewModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <div class="modal-header">
+            <h3 class="modal-title">Gatepass Details</h3>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body space-y-3 text-sm">
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">Status</p><p id="viewStatus" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Delivery Staff</p><p id="viewDeliveryStaff" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Date</p><p id="viewDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Temperature</p><p id="viewTemperature" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Submitted By</p><p id="viewSubmittedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Checked By</p><p id="viewCheckedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div><p class="help mb-0.5">Invoices / DR #</p><p id="viewInvoicesText" class="whitespace-pre-line text-slate-700 dark:text-slate-300"></p></div>
+            <div id="viewNotesWrap" class="hidden"><p class="help mb-0.5">Notes</p><p id="viewNotes" class="text-slate-700 dark:text-slate-300"></p></div>
+            <div id="viewVoidReasonWrap" class="hidden border-t border-slate-200 pt-3 dark:border-slate-800">
+                <p class="help mb-0.5">Void Reason</p><p id="viewVoidReason" class="text-slate-700 dark:text-slate-300"></p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var recordForm = document.getElementById('recordForm');
+        var tbody = document.getElementById('recordsBody');
+
+        document.getElementById('addNewBtn').addEventListener('click', function () {
+            recordForm.reset();
+            document.getElementById('fieldTransDate').value = OS.todayIso();
+            OS.openModal('recordModal');
+        });
+
+        function openView(row) {
+            document.getElementById('viewStatus').textContent = row.getAttribute('data-status') || '—';
+            document.getElementById('viewDeliveryStaff').textContent = row.getAttribute('data-delivery-staff') || '—';
+            document.getElementById('viewDate').textContent =
+                (row.getAttribute('data-trans-date') || '—') + ' ' + (row.getAttribute('data-trans-time') || '');
+            document.getElementById('viewTemperature').textContent = row.getAttribute('data-temperature') || '—';
+            document.getElementById('viewSubmittedBy').textContent = row.getAttribute('data-submitted-by') || '—';
+            document.getElementById('viewCheckedBy').textContent = row.getAttribute('data-checked-by') || '—';
+            document.getElementById('viewInvoicesText').textContent = row.getAttribute('data-invoices-text') || '—';
+
+            var notes = row.getAttribute('data-notes');
+            document.getElementById('viewNotesWrap').classList.toggle('hidden', !notes);
+            document.getElementById('viewNotes').textContent = notes || '';
+
+            var voidReason = row.getAttribute('data-void-reason');
+            document.getElementById('viewVoidReasonWrap').classList.toggle('hidden', !voidReason);
+            document.getElementById('viewVoidReason').textContent = voidReason || '';
+
+            OS.openModal('viewModal');
+        }
+
+        tbody.addEventListener('click', function (e) {
+            var viewBtn = e.target.closest('.js-view');
+            var voidBtn = e.target.closest('.js-void');
+            if (viewBtn) openView(viewBtn.closest('tr'));
+            if (voidBtn) {
+                var reason = prompt('Reason for voiding this gatepass entry (optional):') || '';
+                var f = document.createElement('form');
+                f.method = 'POST'; f.action = voidBtn.getAttribute('data-url');
+                var input = document.createElement('input');
+                input.type = 'hidden'; input.name = 'reason'; input.value = reason;
+                f.appendChild(input);
+                document.body.appendChild(f); f.submit();
+            }
+        });
+
+        var searchInput = document.getElementById('gatepassSearch');
+        searchInput.addEventListener('search', function () {
+            if (searchInput.value === '') document.getElementById('searchForm').submit();
+        });
+    })();
+</script>
+{% endblock %}

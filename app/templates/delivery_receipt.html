@@ -1,0 +1,580 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+
+{% block title %}Delivery Receipts - Office System{% endblock %}
+
+{% block content %}
+{% set STATUS_TONE = {
+    'Created': 'badge-slate',
+    'Printed': 'badge-brand',
+    'Finished': 'badge-success',
+    'Void': 'badge-accent'
+} %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="receipt" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Delivery Receipts</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    The formal proof-of-delivery document handed to a customer.
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Add Delivery Receipt
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="receipt" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Delivery Receipts
+            </h2>
+            <div class="flex items-center gap-2">
+                <form method="GET" action="{{ url_for('main.delivery_receipt') }}" class="relative" id="searchForm">
+                    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" id="drSearch" value="{{ search }}"
+                           placeholder="Search DR #, customer, PO #…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </form>
+                <span class="badge badge-slate whitespace-nowrap">{{ '{:,}'.format(total) }} shown</span>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+            {% for value, label in [
+                ('', 'All'), ('Created', 'Created'), ('Printed', 'Printed'),
+                ('Finished', 'Finished'), ('Void', 'Void')
+            ] %}
+            <a href="{{ url_for('main.delivery_receipt', q=search or None, status=value or None) }}"
+               class="badge {{ 'bg-accent-600 text-white ring-0' if status == value else 'badge-slate' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[56rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th w-24">DR #</th>
+                        <th class="table-th w-24">Date</th>
+                        <th class="table-th">Delivered To</th>
+                        <th class="table-th">PO #</th>
+                        <th class="table-th w-28">Status</th>
+                        <th class="table-th w-40 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for r in delivery_receipts %}
+                    <tr class="table-row"
+                        data-id="{{ r.id }}"
+                        data-dr-number="{{ r.drNumber }}"
+                        data-delivered-to="{{ r.deliveredTo or '—' }}"
+                        data-tin="{{ r.tin or '' }}"
+                        data-address="{{ r.address or '' }}"
+                        data-delivery-date="{{ r.deliveryDate or '' }}"
+                        data-customer-po="{{ r.customerPo or '' }}"
+                        data-terms="{{ r.terms or '' }}"
+                        data-branch="{{ r.branch or '' }}"
+                        data-status="{{ r.status }}"
+                        data-transaction-status="{{ r.transactionStatus or '' }}"
+                        data-created-by-name="{{ r.createdByName or '' }}"
+                        data-notes="{{ r.notes or '' }}"
+                        data-void-reason="{{ r.voidReason or '' }}"
+                        {# single-quoted: Flask's tojson escapes < > & ' but not ",
+                           and JSON is full of " - see purchase_orders.html's data-items #}
+                        data-items='{{ items_by_dr.get(r.id, [])|tojson }}'>
+                        <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">{{ r.drNumber }}</td>
+                        <td class="table-td text-sm">{{ r.deliveryDate or '—' }}</td>
+                        <td class="table-td truncate">{{ r.deliveredTo or '—' }}</td>
+                        <td class="table-td truncate text-sm">{{ r.customerPo or '—' }}</td>
+                        <td class="table-td">
+                            <span class="badge {{ STATUS_TONE.get(r.status, 'badge-slate') }}">{{ r.status }}</span>
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-view" title="View" aria-label="View Delivery Receipt">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                                {% if r.status == 'Created' %}
+                                <button type="button" class="btn btn-icon btn-ghost js-print"
+                                        data-url="{{ url_for('main.delivery_receipt_print', dr_id=r.id) }}" title="Print">
+                                    <i data-lucide="printer" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if r.status == 'Printed' %}
+                                <button type="button" class="btn btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 js-finish"
+                                        data-url="{{ url_for('main.delivery_receipt_finish', dr_id=r.id) }}" title="Finish">
+                                    <i data-lucide="check" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if r.createdBy == session.get('user_id') and r.status != 'Void' %}
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-void"
+                                        data-url="{{ url_for('main.delivery_receipt_void', dr_id=r.id) }}" title="Void">
+                                    <i data-lucide="ban" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="receipt" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No delivery receipts match your filters</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {{ render_pagination(
+            'main.delivery_receipt', page, page_count, total, per_page,
+            {'q': search or None, 'status': status or None}
+        ) }}
+    </div>
+</div>
+
+<!-- ===================== Add Delivery Receipt modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-3xl">
+        <form id="recordForm" method="POST" action="{{ url_for('main.delivery_receipt_add') }}">
+            <div class="modal-header">
+                <h3 class="modal-title">Add Delivery Receipt</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-4">
+                <div class="relative" data-dropdown>
+                    <label class="label" for="customerSearchInput">Customer <span class="text-accent-600">*</span></label>
+                    <input type="text" class="input" id="customerSearchInput" placeholder="Search by customer ID or name…" autocomplete="off" required>
+                    <input type="hidden" id="fieldCustomerId" name="customerId">
+                    <div data-dropdown-panel id="customerOptions"
+                         class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                </div>
+
+                <div>
+                    <label class="label" for="fieldAddress">Delivery Address</label>
+                    <textarea class="input" id="fieldAddress" name="address" rows="2"></textarea>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                    <div>
+                        <label class="label" for="fieldDeliveryDate">Delivery Date</label>
+                        <input type="date" class="input" id="fieldDeliveryDate" name="deliveryDate">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldCustomerPo">Customer PO #</label>
+                        <input type="text" class="input" id="fieldCustomerPo" name="customerPo">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldTerms">Terms</label>
+                        <input type="text" class="input" id="fieldTerms" name="terms">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldBranch">Branch</label>
+                        <input type="text" class="input" id="fieldBranch" name="branch">
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-200 pt-4 dark:border-slate-800">
+                    <label class="label">Line Items <span class="text-accent-600">*</span></label>
+                    <div id="itemsList" class="space-y-3"></div>
+                    <button type="button" class="btn btn-secondary mt-3" id="addItemBtn">
+                        <i data-lucide="plus" class="h-4 w-4"></i>Add Line Item
+                    </button>
+                    <input type="hidden" id="fieldItemsJson" name="itemsJson">
+                </div>
+
+                <div>
+                    <label class="label" for="fieldNotes">Notes</label>
+                    <textarea class="input" id="fieldNotes" name="notes" rows="2"></textarea>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i data-lucide="send" class="h-4 w-4"></i>Submit Delivery Receipt
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<template id="itemRowTemplate">
+    <div class="js-item-row rounded-xl border border-slate-200 p-4 dark:border-slate-700" data-item="">
+        <div class="mb-3 flex items-center justify-between gap-2">
+            <span class="js-item-number grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-50
+                         text-xs font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"></span>
+            <button type="button" class="js-remove-item btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                    data-action="remove-item" aria-label="Remove this line item">
+                <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+        </div>
+
+        <div class="relative" data-dropdown>
+            <label class="label">Catalog / Description <span class="text-accent-600">*</span></label>
+            <input type="text" class="js-item-catalog-search input" autocomplete="off" placeholder="Search inventory catalog…">
+            <div class="js-item-catalog-panel hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg
+                        border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+        </div>
+
+        <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <div>
+                <label class="label">Unit</label>
+                <input type="text" class="js-item-unit input">
+            </div>
+            <div>
+                <label class="label">Quantity <span class="text-accent-600">*</span></label>
+                <input type="number" class="js-item-quantity input" min="0.01" step="0.01">
+            </div>
+            <div>
+                <label class="label">Lot</label>
+                <input type="text" class="js-item-lot input">
+            </div>
+            <div>
+                <label class="label">Expiry</label>
+                <input type="date" class="js-item-expiry input">
+            </div>
+            <div>
+                <label class="label">PO # (if different)</label>
+                <input type="text" class="js-item-po input">
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- ===================== View detail modal ===================== -->
+<div id="viewModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <h3 class="modal-title">Delivery Receipt Details</h3>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body space-y-3 text-sm">
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">DR #</p><p id="viewDrNumber" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Status</p><p id="viewStatus" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Delivered To</p><p id="viewDeliveredTo" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">TIN</p><p id="viewTin" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Delivery Date</p><p id="viewDeliveryDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Customer PO #</p><p id="viewCustomerPo" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Terms</p><p id="viewTerms" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Branch</p><p id="viewBranch" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div id="viewAddressWrap"><p class="help mb-0.5">Address</p><p id="viewAddress" class="text-slate-700 dark:text-slate-300"></p></div>
+            <div>
+                <p class="help mb-1">Line Items</p>
+                <div id="viewItems" class="space-y-2"></div>
+            </div>
+            <div id="viewTxnWrap" class="hidden rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
+                <p class="help mb-0.5">Linked Warehouse Transaction</p>
+                <p id="viewTxnStatus" class="text-slate-700 dark:text-slate-300"></p>
+            </div>
+            <div id="viewNotesWrap" class="hidden"><p class="help mb-0.5">Notes</p><p id="viewNotes" class="text-slate-700 dark:text-slate-300"></p></div>
+            <div id="viewVoidReasonWrap" class="hidden border-t border-slate-200 pt-3 dark:border-slate-800">
+                <p class="help mb-0.5">Void Reason</p><p id="viewVoidReason" class="text-slate-700 dark:text-slate-300"></p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var CUSTOMERS = {{ customers|tojson }};
+        var INVENTORY_ITEMS = {{ inventory_items|tojson }};
+
+        var recordForm = document.getElementById('recordForm');
+        var tbody = document.getElementById('recordsBody');
+        var escapeHtml = Pickers.escapeHtml;
+        var initSearchablePicker = Pickers.initSearchablePicker;
+
+        var customerPicker = initSearchablePicker(
+            'customerSearchInput', 'fieldCustomerId', 'customerOptions', CUSTOMERS,
+            function (c) { return c.id; }, function (c) { return c.name; },
+            function (c) { return (c.code || '') + ' — ' + c.name; }
+        );
+
+        /* ------------------------------------------------- line items
+           Rows keyed by a minted uid, never array index - same reasoning as every other
+           repeatable line-item list in this app. */
+        var items = [];
+        var itemUidCounter = 0;
+        var itemsList = document.getElementById('itemsList');
+        var itemRowTemplate = document.getElementById('itemRowTemplate');
+        var fieldItemsJson = document.getElementById('fieldItemsJson');
+
+        function makeItem() {
+            itemUidCounter += 1;
+            return { uid: 'i' + itemUidCounter, itemId: null, catalogCode: '', description: '', unit: '', category: '', quantity: '', lot: '', expiryDate: '', customerPo: '' };
+        }
+
+        function itemByUid(uid) {
+            for (var i = 0; i < items.length; i++) if (items[i].uid === uid) return items[i];
+            return null;
+        }
+
+        function rowFor(uid) {
+            return itemsList.querySelector('.js-item-row[data-item="' + uid + '"]');
+        }
+
+        function initItemCatalogPicker(row, item) {
+            var input = row.querySelector('.js-item-catalog-search');
+            var panel = row.querySelector('.js-item-catalog-panel');
+            Pickers.registerPanel(panel);
+
+            function label(p) { return p.catalog + ' — ' + (p.description || ''); }
+
+            function render(filterText) {
+                var term = (filterText || '').trim().toLowerCase();
+                var matches = INVENTORY_ITEMS.filter(function (p) {
+                    return !term || p.catalog.toLowerCase().indexOf(term) !== -1
+                        || (p.description || '').toLowerCase().indexOf(term) !== -1;
+                });
+                panel.innerHTML = matches.length
+                    ? matches.slice(0, 50).map(function (p, idx) {
+                        return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-idx="' + idx + '">'
+                            + escapeHtml(label(p)) + '</button>';
+                    }).join('')
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matching item</p>';
+                panel._matches = matches.slice(0, 50);
+            }
+
+            function selectItem(p) {
+                item.itemId = p.id;
+                item.catalogCode = p.catalog;
+                item.description = p.description || '';
+                item.unit = p.baseUnit || '';
+                item.category = p.category || '';
+                input.value = label(p);
+                row.querySelector('.js-item-unit').value = item.unit;
+                panel.classList.add('hidden');
+                syncItems();
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-idx]');
+                if (!btn || !panel._matches) return;
+                var p = panel._matches[parseInt(btn.getAttribute('data-idx'), 10)];
+                if (p) selectItem(p);
+            });
+
+            input.addEventListener('input', function () {
+                item.itemId = null;
+                item.catalogCode = '';
+                item.description = '';
+                render(input.value);
+                panel.classList.remove('hidden');
+                syncItems();
+            });
+
+            input.addEventListener('click', function (e) {
+                e.stopPropagation();
+                Pickers.closeAllOtherDropdowns(panel);
+                render(input.value);
+                panel.classList.remove('hidden');
+            });
+        }
+
+        function appendItemRow(item) {
+            var frag = itemRowTemplate.content.cloneNode(true);
+            var row = frag.querySelector('.js-item-row');
+            row.setAttribute('data-item', item.uid);
+            itemsList.appendChild(frag);
+            var liveRow = rowFor(item.uid);
+            initItemCatalogPicker(liveRow, item);
+            OS.refreshIcons();
+        }
+
+        function renumberItems() {
+            var rows = itemsList.querySelectorAll('.js-item-row');
+            rows.forEach(function (row, i) {
+                row.querySelector('.js-item-number').textContent = i + 1;
+                row.querySelector('.js-remove-item').classList.toggle('hidden', rows.length <= 1);
+            });
+        }
+
+        function syncItems() {
+            fieldItemsJson.value = JSON.stringify(items.map(function (it) {
+                return {
+                    itemId: it.itemId, catalogCode: it.catalogCode, description: it.description,
+                    unit: it.unit, category: it.category, quantity: it.quantity, lot: it.lot,
+                    expiryDate: it.expiryDate, customerPo: it.customerPo,
+                };
+            }));
+        }
+
+        function addItem() {
+            var item = makeItem();
+            items.push(item);
+            appendItemRow(item);
+            renumberItems();
+            syncItems();
+            return item;
+        }
+
+        function removeItem(uid) {
+            var row = rowFor(uid);
+            if (row) row.remove();
+            items = items.filter(function (it) { return it.uid !== uid; });
+            renumberItems();
+            syncItems();
+        }
+
+        function resetItems() {
+            items = [];
+            itemsList.innerHTML = '';
+            addItem();
+        }
+
+        itemsList.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-action]');
+            if (!btn) return;
+            var row = btn.closest('.js-item-row');
+            if (!row) return;
+            if (btn.getAttribute('data-action') === 'remove-item') removeItem(row.getAttribute('data-item'));
+        });
+
+        itemsList.addEventListener('input', function (e) {
+            var row = e.target.closest('.js-item-row');
+            if (!row) return;
+            var item = itemByUid(row.getAttribute('data-item'));
+            if (!item) return;
+            if (e.target.classList.contains('js-item-unit')) item.unit = e.target.value;
+            else if (e.target.classList.contains('js-item-quantity')) item.quantity = e.target.value;
+            else if (e.target.classList.contains('js-item-lot')) item.lot = e.target.value;
+            else if (e.target.classList.contains('js-item-expiry')) item.expiryDate = e.target.value;
+            else if (e.target.classList.contains('js-item-po')) item.customerPo = e.target.value;
+            else return;
+            syncItems();
+        });
+
+        document.getElementById('addItemBtn').addEventListener('click', function () { addItem(); });
+
+        recordForm.addEventListener('submit', function (e) {
+            if (!items.length) { e.preventDefault(); alert('Add at least one line item.'); return; }
+            for (var i = 0; i < items.length; i++) {
+                var it = items[i], n = i + 1;
+                if (!(it.description || '').trim()) { e.preventDefault(); alert('Line item ' + n + ' needs a description.'); return; }
+                if (!(parseFloat(it.quantity) > 0)) { e.preventDefault(); alert('Line item ' + n + ' needs a quantity.'); return; }
+            }
+        });
+
+        /* ------------------------------------------------------------- add */
+        document.getElementById('addNewBtn').addEventListener('click', function () {
+            recordForm.reset();
+            customerPicker.reset();
+            resetItems();
+            OS.openModal('recordModal');
+        });
+
+        /* --------------------------------------------------------------- view */
+        function renderViewItems(row) {
+            var wrap = document.getElementById('viewItems');
+            var drItems = [];
+            try { drItems = JSON.parse(row.getAttribute('data-items') || '[]'); } catch (err) { drItems = []; }
+            if (!drItems.length) {
+                wrap.innerHTML = '<p class="text-slate-500 dark:text-slate-400">No line items.</p>';
+                return;
+            }
+            wrap.innerHTML = drItems.map(function (it, i) {
+                var meta = [];
+                if (it.quantity != null) meta.push(it.quantity + (it.unit ? ' ' + it.unit : ''));
+                if (it.lot) meta.push('Lot ' + it.lot);
+                if (it.expiryDate) meta.push('Exp ' + it.expiryDate);
+                return '<div class="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
+                    + '<div class="flex items-center justify-between gap-2">'
+                    + '<span class="text-xs font-semibold text-slate-900 dark:text-white">' + (i + 1) + '. ' + escapeHtml(it.description || it.catalogCode || '—') + '</span>'
+                    + '<span class="shrink-0 text-xs text-slate-500 dark:text-slate-400">' + meta.join(' · ') + '</span>'
+                    + '</div></div>';
+            }).join('');
+        }
+
+        function openView(row) {
+            document.getElementById('viewDrNumber').textContent = row.getAttribute('data-dr-number') || '—';
+            document.getElementById('viewStatus').textContent = row.getAttribute('data-status') || '—';
+            document.getElementById('viewDeliveredTo').textContent = row.getAttribute('data-delivered-to') || '—';
+            document.getElementById('viewTin').textContent = row.getAttribute('data-tin') || '—';
+            document.getElementById('viewDeliveryDate').textContent = row.getAttribute('data-delivery-date') || '—';
+            document.getElementById('viewCustomerPo').textContent = row.getAttribute('data-customer-po') || '—';
+            document.getElementById('viewTerms').textContent = row.getAttribute('data-terms') || '—';
+            document.getElementById('viewBranch').textContent = row.getAttribute('data-branch') || '—';
+            document.getElementById('viewAddress').textContent = row.getAttribute('data-address') || '—';
+
+            renderViewItems(row);
+
+            var txnStatus = row.getAttribute('data-transaction-status');
+            document.getElementById('viewTxnWrap').classList.toggle('hidden', !txnStatus);
+            document.getElementById('viewTxnStatus').textContent = txnStatus || '';
+
+            var notes = row.getAttribute('data-notes');
+            document.getElementById('viewNotesWrap').classList.toggle('hidden', !notes);
+            document.getElementById('viewNotes').textContent = notes || '';
+
+            var voidReason = row.getAttribute('data-void-reason');
+            document.getElementById('viewVoidReasonWrap').classList.toggle('hidden', !voidReason);
+            document.getElementById('viewVoidReason').textContent = voidReason || '';
+
+            OS.openModal('viewModal');
+        }
+
+        /* --------------------------------------------------- print/finish/void */
+        tbody.addEventListener('click', function (e) {
+            var viewBtn = e.target.closest('.js-view');
+            var printBtn = e.target.closest('.js-print');
+            var finishBtn = e.target.closest('.js-finish');
+            var voidBtn = e.target.closest('.js-void');
+
+            if (viewBtn) openView(viewBtn.closest('tr'));
+            if (printBtn && confirm('Mark this delivery receipt as printed?')) {
+                var f1 = document.createElement('form');
+                f1.method = 'POST'; f1.action = printBtn.getAttribute('data-url');
+                document.body.appendChild(f1); f1.submit();
+            }
+            if (finishBtn && confirm('Mark this delivery receipt as finished?')) {
+                var f2 = document.createElement('form');
+                f2.method = 'POST'; f2.action = finishBtn.getAttribute('data-url');
+                document.body.appendChild(f2); f2.submit();
+            }
+            if (voidBtn) {
+                var reason = prompt('Reason for voiding this delivery receipt (optional):') || '';
+                var f3 = document.createElement('form');
+                f3.method = 'POST'; f3.action = voidBtn.getAttribute('data-url');
+                var input = document.createElement('input');
+                input.type = 'hidden'; input.name = 'reason'; input.value = reason;
+                f3.appendChild(input);
+                document.body.appendChild(f3); f3.submit();
+            }
+        });
+
+        var searchInput = document.getElementById('drSearch');
+        searchInput.addEventListener('search', function () {
+            if (searchInput.value === '') document.getElementById('searchForm').submit();
+        });
+    })();
+</script>
+{% endblock %}
