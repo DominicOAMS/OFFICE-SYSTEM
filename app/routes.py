@@ -2833,9 +2833,15 @@ def receivables_collectibles():
         offset=(page - 1) * COLLECTIBLES_PER_PAGE,
         outstanding_only=True,
     )
+    invoice_ids = [r["id"] for r in records]
+    items_by_invoice = {
+        invoice_id: [_invoice_item_for_view(i) for i in items]
+        for invoice_id, items in invoices_repo.list_items_for_invoices(invoice_ids).items()
+    }
     return render_template(
         "collectibles.html",
         invoices=records,
+        items_by_invoice=items_by_invoice,
         search=search,
         page=page,
         page_count=page_count,

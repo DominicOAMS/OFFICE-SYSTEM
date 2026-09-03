@@ -7,7 +7,9 @@
 {% set STATUS_TONE = {
     'Created': 'badge-slate',
     'Printed': 'badge-brand',
-    'Delivered': 'badge-warning'
+    'Delivered': 'badge-warning',
+    'Finished': 'badge-slate',
+    'Returned': 'badge-slate'
 } %}
 <div class="px-4 py-6 sm:px-6">
 
@@ -55,12 +57,35 @@
                         <th class="table-th">Sold To</th>
                         <th class="table-th w-28">Status</th>
                         <th class="table-th w-32 text-right">Total</th>
-                        <th class="table-th w-40 text-right">Actions</th>
+                        <th class="table-th w-48 text-right">Actions</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="recordsBody">
                     {% for inv in invoices %}
-                    <tr class="table-row">
+                    <tr class="table-row"
+                        data-id="{{ inv.id }}"
+                        data-invoice-number="{{ inv.invoiceNumber }}"
+                        data-invoice-date="{{ inv.invoiceDate or '' }}"
+                        data-branch="{{ inv.branch or '' }}"
+                        data-sold-to="{{ inv.soldTo or '' }}"
+                        data-tin="{{ inv.tin or '' }}"
+                        data-customer-po="{{ inv.customerPo or '' }}"
+                        data-noa-number="{{ inv.noaNumber or '' }}"
+                        data-sales-person="{{ inv.salesPerson or '' }}"
+                        data-payment-terms="{{ inv.paymentTerms or '' }}"
+                        data-payment-due-date="{{ inv.paymentDueDate or '' }}"
+                        data-invoice-type="{{ inv.invoiceType or '' }}"
+                        data-vatable-amount="{{ inv.vatableAmount or '' }}"
+                        data-vat-amount="{{ inv.vatAmount or '' }}"
+                        data-total-amount="{{ inv.totalAmount or '' }}"
+                        data-status="{{ inv.status }}"
+                        data-created-by-name="{{ inv.createdByName or '' }}"
+                        data-printed-by-name="{{ inv.printedByName or '' }}"
+                        data-delivered-by-name="{{ inv.deliveredByName or '' }}"
+                        data-notes="{{ inv.notes or '' }}"
+                        {# single-quoted: Flask's tojson escapes < > & ' but not ",
+                           and JSON is full of " - see purchase_orders.html's data-items #}
+                        data-items='{{ items_by_invoice.get(inv.id, [])|tojson }}'>
                         <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">{{ inv.invoiceNumber }}</td>
                         <td class="table-td text-sm">{{ inv.invoiceDate or '—' }}</td>
                         <td class="table-td truncate">{{ inv.soldTo or '—' }}</td>
@@ -70,14 +95,19 @@
                         <td class="table-td text-right text-sm">
                             {% if inv.totalAmount %}₱{{ '{:,.2f}'.format(inv.totalAmount) }}{% else %}—{% endif %}
                         </td>
-                        <td class="table-td text-right">
-                            {% if inv.status == 'Delivered' and inv.customerId %}
-                            <a href="{{ url_for('main.receivables_collections', customerId=inv.customerId) }}" class="btn btn-secondary btn-sm">
-                                <i data-lucide="wallet" class="h-3.5 w-3.5"></i>Collect
-                            </a>
-                            {% else %}
-                            <span class="text-xs text-slate-400">Not yet Delivered</span>
-                            {% endif %}
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-view" title="View" aria-label="View Invoice">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                                {% if inv.status == 'Delivered' and inv.customerId %}
+                                <a href="{{ url_for('main.receivables_collections', customerId=inv.customerId) }}" class="btn btn-secondary btn-sm">
+                                    <i data-lucide="wallet" class="h-3.5 w-3.5"></i>Collect
+                                </a>
+                                {% else %}
+                                <span class="text-xs text-slate-400">Not yet Delivered</span>
+                                {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% else %}
@@ -100,11 +130,140 @@
         ) }}
     </div>
 </div>
+
+<!-- ===================== View detail modal ===================== -->
+<div id="viewModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <h3 class="modal-title">Invoice Details</h3>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body space-y-3 text-sm">
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">Invoice #</p><p id="viewInvoiceNumber" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Status</p><p id="viewStatus" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Date</p><p id="viewInvoiceDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Branch</p><p id="viewBranch" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Sold To</p><p id="viewSoldTo" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">TIN</p><p id="viewTin" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Customer PO #</p><p id="viewCustomerPo" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">NOA #</p><p id="viewNoaNumber" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Sales Person</p><p id="viewSalesPerson" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Payment Terms</p><p id="viewPaymentTerms" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Payment Due</p><p id="viewPaymentDueDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Invoice Type</p><p id="viewInvoiceType" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div class="space-y-1 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+                <div class="flex items-center justify-between"><span class="help mb-0">Vatable Sales</span><span id="viewVatable" class="text-slate-700 dark:text-slate-300"></span></div>
+                <div class="flex items-center justify-between"><span class="help mb-0">VAT</span><span id="viewVat" class="text-slate-700 dark:text-slate-300"></span></div>
+                <div class="flex items-center justify-between border-t border-slate-200 pt-1 font-semibold text-slate-900 dark:border-slate-700 dark:text-white">
+                    <span>Total</span><span id="viewTotal"></span>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">Created By</p><p id="viewCreatedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Printed By</p><p id="viewPrintedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Delivered By</p><p id="viewDeliveredBy" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div>
+                <p class="help mb-1">Line Items</p>
+                <div id="viewItems" class="space-y-2"></div>
+            </div>
+            <div id="viewNotesWrap" class="hidden"><p class="help mb-0.5">Notes</p><p id="viewNotes" class="text-slate-700 dark:text-slate-300"></p></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
     (function () {
+        var tbody = document.getElementById('recordsBody');
+        var peso = OS.peso;
+        var escapeHtml = Pickers.escapeHtml;
+
+        function formatDateDisplay(iso) {
+            if (!iso) return '';
+            var parts = iso.split('-');
+            if (parts.length !== 3) return iso;
+            var d = new Date(Date.UTC(+parts[0], +parts[1] - 1, +parts[2]));
+            return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+        }
+
+        function renderViewItems(row) {
+            var wrap = document.getElementById('viewItems');
+            var invItems = [];
+            try {
+                invItems = JSON.parse(row.getAttribute('data-items') || '[]');
+            } catch (err) {
+                invItems = [];
+            }
+            if (!invItems.length) {
+                wrap.innerHTML = '<p class="text-slate-500 dark:text-slate-400">No line items.</p>';
+                return;
+            }
+            wrap.innerHTML = invItems.map(function (it, i) {
+                var meta = [];
+                if (it.enteredPackSize) {
+                    meta.push(it.enteredQuantity + ' BOX (' + it.quantity + ' ' + (it.unit || 'pcs') + ')');
+                } else if (it.quantity != null) {
+                    meta.push(it.quantity + (it.unit ? ' ' + it.unit : ''));
+                }
+                if (it.unitPrice != null) meta.push('@ ' + peso(it.unitPrice) + ' = ' + peso(it.amount));
+                if (it.lot) meta.push('Lot ' + it.lot);
+                if (it.expiryDate) meta.push('Exp ' + formatDateDisplay(it.expiryDate));
+                return '<div class="rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
+                    + '<div class="flex items-center justify-between gap-2">'
+                    + '<span class="text-xs font-semibold text-slate-900 dark:text-white">' + (i + 1) + '. '
+                    + escapeHtml(it.description || it.catalogCode || '—') + '</span>'
+                    + '</div><p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">' + meta.join(' · ') + '</p></div>';
+            }).join('');
+        }
+
+        function openView(row) {
+            document.getElementById('viewInvoiceNumber').textContent = row.getAttribute('data-invoice-number') || '—';
+            document.getElementById('viewStatus').textContent = row.getAttribute('data-status') || '—';
+            document.getElementById('viewInvoiceDate').textContent = formatDateDisplay(row.getAttribute('data-invoice-date')) || '—';
+            document.getElementById('viewBranch').textContent = row.getAttribute('data-branch') || '—';
+            document.getElementById('viewSoldTo').textContent = row.getAttribute('data-sold-to') || '—';
+            document.getElementById('viewTin').textContent = row.getAttribute('data-tin') || '—';
+            document.getElementById('viewCustomerPo').textContent = row.getAttribute('data-customer-po') || '—';
+            document.getElementById('viewNoaNumber').textContent = row.getAttribute('data-noa-number') || '—';
+            document.getElementById('viewSalesPerson').textContent = row.getAttribute('data-sales-person') || '—';
+            document.getElementById('viewPaymentTerms').textContent = row.getAttribute('data-payment-terms') || '—';
+            document.getElementById('viewPaymentDueDate').textContent = formatDateDisplay(row.getAttribute('data-payment-due-date')) || '—';
+            document.getElementById('viewInvoiceType').textContent = row.getAttribute('data-invoice-type') || '—';
+
+            var vatable = row.getAttribute('data-vatable-amount');
+            var vat = row.getAttribute('data-vat-amount');
+            var total = row.getAttribute('data-total-amount');
+            document.getElementById('viewVatable').textContent = vatable ? peso(vatable) : '—';
+            document.getElementById('viewVat').textContent = vat ? peso(vat) : '—';
+            document.getElementById('viewTotal').textContent = total ? peso(total) : '—';
+
+            document.getElementById('viewCreatedBy').textContent = row.getAttribute('data-created-by-name') || '—';
+            document.getElementById('viewPrintedBy').textContent = row.getAttribute('data-printed-by-name') || '—';
+            document.getElementById('viewDeliveredBy').textContent = row.getAttribute('data-delivered-by-name') || '—';
+
+            renderViewItems(row);
+
+            var notes = row.getAttribute('data-notes');
+            document.getElementById('viewNotesWrap').classList.toggle('hidden', !notes);
+            document.getElementById('viewNotes').textContent = notes || '';
+
+            OS.openModal('viewModal');
+        }
+
+        tbody.addEventListener('click', function (e) {
+            var viewBtn = e.target.closest('.js-view');
+            if (viewBtn) openView(viewBtn.closest('tr'));
+        });
+
         var searchInput = document.getElementById('collectiblesSearch');
         searchInput.addEventListener('search', function () {
             if (searchInput.value === '') document.getElementById('searchForm').submit();
