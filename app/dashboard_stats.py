@@ -24,17 +24,19 @@ def get_dashboard_stats():
             )
             invoices_this_month = cur.fetchone()["n"]
 
+            # Counts, not peso totals - a dashboard shouldn't broadcast how much money is
+            # owed to/by the business to anyone who glances at a screen.
             cur.execute(
-                "SELECT COALESCE(SUM(totalAmount), 0) AS n FROM tbl_invoices "
+                "SELECT COUNT(*) AS n FROM tbl_invoices "
                 "WHERE isDeleted = 0 AND status NOT IN ('Paid', 'Void')"
             )
-            outstanding_receivables = cur.fetchone()["n"]
+            outstanding_receivables_count = cur.fetchone()["n"]
 
             cur.execute(
-                "SELECT COALESCE(SUM(netAmount), 0) AS n FROM tbl_account_payables "
+                "SELECT COUNT(*) AS n FROM tbl_account_payables "
                 "WHERE isDeleted = 0 AND status = 'Verified'"
             )
-            outstanding_payables = cur.fetchone()["n"]
+            outstanding_payables_count = cur.fetchone()["n"]
 
             cur.execute(
                 "SELECT COUNT(*) AS n FROM tbl_inventory_items WHERE isDeleted = 0 AND status = 'AC'"
@@ -67,8 +69,8 @@ def get_dashboard_stats():
 
             return {
                 "invoices_this_month": invoices_this_month,
-                "outstanding_receivables": outstanding_receivables,
-                "outstanding_payables": outstanding_payables,
+                "outstanding_receivables_count": outstanding_receivables_count,
+                "outstanding_payables_count": outstanding_payables_count,
                 "active_stock_items": active_stock_items,
                 "pos_pending_approval": pos_pending_approval,
                 "fuel_pos_pending_approval": fuel_pos_pending_approval,
