@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Reports - Office System{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex items-start gap-3">
+        <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                     dark:bg-brand-500/10 dark:text-brand-400">
+            <i data-lucide="bar-chart-3" class="h-5 w-5"></i>
+        </span>
+        <div>
+            <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Reports</h1>
+            <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                Download what's already on a list page as a CSV, optionally narrowed by date range or status.
+            </p>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {% for key, dataset in datasets.items() %}
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">
+                    <i data-lucide="file-down" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                    {{ dataset.label }}
+                </h2>
+            </div>
+            <form method="GET" action="{{ url_for('main.reports_export', dataset_key=key) }}" class="space-y-3 p-5">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="label" for="{{ key }}From">From</label>
+                        <input type="date" class="input" id="{{ key }}From" name="from">
+                    </div>
+                    <div>
+                        <label class="label" for="{{ key }}To">To</label>
+                        <input type="date" class="input" id="{{ key }}To" name="to">
+                    </div>
+                </div>
+                {% if dataset.status_choices %}
+                <div>
+                    <label class="label" for="{{ key }}Status">Status</label>
+                    <select class="input" id="{{ key }}Status" name="status">
+                        <option value="">All statuses</option>
+                        {% for choice in dataset.status_choices %}
+                        <option value="{{ choice }}">{{ choice }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+                <div>
+                    <label class="label" for="{{ key }}Search">Search (optional)</label>
+                    <input type="search" class="input" id="{{ key }}Search" name="q" placeholder="Filter by keyword…">
+                </div>
+                <button type="submit" class="btn btn-primary w-full">
+                    <i data-lucide="download" class="h-4 w-4"></i>Download CSV
+                </button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

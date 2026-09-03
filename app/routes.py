@@ -34,6 +34,7 @@ from . import (
     program_menu_repo,
     purchase_order_approvers_repo,
     purchase_orders_repo,
+    reports,
     suppliers_repo,
     users_repo,
     vehicles_repo,
@@ -2894,6 +2895,30 @@ def receivables_soa():
         customer=customer,
         entries=entries,
     )
+
+
+def _parse_report_date(raw):
+    raw = (raw or "").strip()
+    try:
+        return date.fromisoformat(raw) if raw else None
+    except ValueError:
+        return None
+
+
+@main_bp.route("/page/reports_downloadables")
+@login_required
+def reports_downloadables():
+    return render_template("reports_downloadables.html", datasets=reports.DATASETS)
+
+
+@main_bp.route("/page/reports_downloadables/export/<dataset_key>")
+@login_required
+def reports_export(dataset_key):
+    search = request.args.get("q", "").strip() or None
+    status = request.args.get("status", "").strip() or None
+    date_from = _parse_report_date(request.args.get("from"))
+    date_to = _parse_report_date(request.args.get("to"))
+    return reports.build_csv(dataset_key, search, status, date_from, date_to)
 
 
 @main_bp.route("/page/<slug>")
