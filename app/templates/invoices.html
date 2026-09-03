@@ -697,14 +697,6 @@
             OS.refreshIcons();
         }
 
-        function renumberItems() {
-            var rows = itemsList.querySelectorAll('.js-item-row');
-            rows.forEach(function (row, i) {
-                row.querySelector('.js-item-number').textContent = i + 1;
-                row.querySelector('.js-remove-item').classList.toggle('hidden', rows.length <= 1);
-            });
-        }
-
         // Both serializes the payload AND recomputes the money display in one pass - same
         // combined shape purchase_orders.html uses. VAT-INCLUSIVE: the line Amount already
         // has VAT in it, so Vatable is backed out of the total rather than added on top
@@ -736,7 +728,7 @@
             var item = makeItem();
             items.push(item);
             appendItemRow(item);
-            renumberItems();
+            Pickers.renumberItems(itemsList);
             syncItems();
             return item;
         }
@@ -745,7 +737,7 @@
             var row = rowFor(uid);
             if (row) row.remove();
             items = items.filter(function (it) { return it.uid !== uid; });
-            renumberItems();
+            Pickers.renumberItems(itemsList);
             syncItems();
         }
 
@@ -793,7 +785,7 @@
                 row.querySelector('.js-item-expiry').value = item.expiryDate;
                 updatePackToggle(row, item);
             });
-            renumberItems();
+            Pickers.renumberItems(itemsList);
             syncItems();
         }
 
@@ -1021,21 +1013,9 @@
 
             if (viewBtn) openView(viewBtn.closest('tr'));
             if (editBtn) openEdit(editBtn.closest('tr'));
-            if (printBtn && confirm('Mark this invoice as printed?')) {
-                var f1 = document.createElement('form');
-                f1.method = 'POST'; f1.action = printBtn.getAttribute('data-url');
-                document.body.appendChild(f1); f1.submit();
-            }
-            if (deliverBtn && confirm('Mark this invoice as delivered?')) {
-                var f2 = document.createElement('form');
-                f2.method = 'POST'; f2.action = deliverBtn.getAttribute('data-url');
-                document.body.appendChild(f2); f2.submit();
-            }
-            if (payBtn && confirm('Mark this invoice as paid?')) {
-                var f3 = document.createElement('form');
-                f3.method = 'POST'; f3.action = payBtn.getAttribute('data-url');
-                document.body.appendChild(f3); f3.submit();
-            }
+            if (printBtn) Pickers.confirmAndSubmit(printBtn.getAttribute('data-url'), 'Mark this invoice as printed?');
+            if (deliverBtn) Pickers.confirmAndSubmit(deliverBtn.getAttribute('data-url'), 'Mark this invoice as delivered?');
+            if (payBtn) Pickers.confirmAndSubmit(payBtn.getAttribute('data-url'), 'Mark this invoice as paid?');
             if (voidBtn) {
                 document.getElementById('voidReason').value = '';
                 voidForm.action = '/page/invoice_invoices/' + voidBtn.closest('tr').getAttribute('data-id') + '/void';

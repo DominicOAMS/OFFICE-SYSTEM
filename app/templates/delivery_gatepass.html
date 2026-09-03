@@ -253,15 +253,7 @@
             var viewBtn = e.target.closest('.js-view');
             var voidBtn = e.target.closest('.js-void');
             if (viewBtn) openView(viewBtn.closest('tr'));
-            if (voidBtn) {
-                var reason = prompt('Reason for voiding this gatepass entry (optional):') || '';
-                var f = document.createElement('form');
-                f.method = 'POST'; f.action = voidBtn.getAttribute('data-url');
-                var input = document.createElement('input');
-                input.type = 'hidden'; input.name = 'reason'; input.value = reason;
-                f.appendChild(input);
-                document.body.appendChild(f); f.submit();
-            }
+            if (voidBtn) Pickers.promptAndSubmitWithReason(voidBtn.getAttribute('data-url'), 'Reason for voiding this gatepass entry (optional):');
         });
 
         var searchInput = document.getElementById('gatepassSearch');

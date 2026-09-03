@@ -90,10 +90,55 @@
         };
     }
 
+    // Mechanical status-action buttons (Print/Finish/Deliver/Pay/Verify) - a confirm()
+    // dialog, then a throwaway <form> POSTed and discarded. Extracted from seven near-
+    // identical copies across Invoices, Delivery Receipt, and Warehouse Transactions -
+    // only the confirm message and target URL ever varied.
+    function confirmAndSubmit(url, message) {
+        if (!confirm(message)) return;
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = url;
+        document.body.appendChild(form);
+        form.submit();
+    }
+
+    // Void-with-a-typed-reason, for the modules simple enough not to need a full shared
+    // confirm modal (a plain prompt() is enough) - Delivery Receipt and Gatepass. Modules
+    // with a richer void flow (Invoices, Warehouse Transactions, Payables, ...) keep their
+    // own dedicated confirm modal instead; this is only for the plain-prompt cases.
+    function promptAndSubmitWithReason(url, promptMessage, fieldName) {
+        var reason = prompt(promptMessage) || '';
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = url;
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = fieldName || 'reason';
+        input.value = reason;
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
+    }
+
+    // Relabels a repeatable line-item list's row numbers and shows/hides each row's
+    // remove button (hidden once only one row is left) - extracted from four identical
+    // copies across every module with repeatable line items.
+    function renumberItems(itemsList) {
+        var rows = itemsList.querySelectorAll('.js-item-row');
+        rows.forEach(function (row, i) {
+            row.querySelector('.js-item-number').textContent = i + 1;
+            row.querySelector('.js-remove-item').classList.toggle('hidden', rows.length <= 1);
+        });
+    }
+
     window.Pickers = {
         initSearchablePicker: initSearchablePicker,
         escapeHtml: escapeHtml,
         closeAllOtherDropdowns: closeAllOtherDropdowns,
         registerPanel: registerPanel,
+        confirmAndSubmit: confirmAndSubmit,
+        promptAndSubmitWithReason: promptAndSubmitWithReason,
+        renumberItems: renumberItems,
     };
 })();

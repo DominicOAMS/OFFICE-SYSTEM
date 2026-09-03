@@ -618,14 +618,6 @@
             OS.refreshIcons();
         }
 
-        function renumberItems() {
-            var rows = itemsList.querySelectorAll('.js-item-row');
-            rows.forEach(function (row, i) {
-                row.querySelector('.js-item-number').textContent = i + 1;
-                row.querySelector('.js-remove-item').classList.toggle('hidden', rows.length <= 1);
-            });
-        }
-
         function syncItems() {
             fieldItemsJson.value = JSON.stringify(items.map(function (it) {
                 return {
@@ -640,7 +632,7 @@
             var item = makeItem();
             items.push(item);
             appendItemRow(item);
-            renumberItems();
+            Pickers.renumberItems(itemsList);
             syncItems();
             return item;
         }
@@ -649,7 +641,7 @@
             var row = rowFor(uid);
             if (row) row.remove();
             items = items.filter(function (it) { return it.uid !== uid; });
-            renumberItems();
+            Pickers.renumberItems(itemsList);
             syncItems();
         }
 
@@ -703,7 +695,7 @@
                 row.querySelector('.js-item-expiry').value = item.expiryDate;
                 updatePackToggle(row, item);
             });
-            renumberItems();
+            Pickers.renumberItems(itemsList);
             syncItems();
         }
 
@@ -911,16 +903,8 @@
 
             if (viewBtn) openView(viewBtn.closest('tr'));
             if (editBtn) openEdit(editBtn.closest('tr'));
-            if (verifyBtn && confirm('Verify this transaction?')) {
-                var f1 = document.createElement('form');
-                f1.method = 'POST'; f1.action = verifyBtn.getAttribute('data-url');
-                document.body.appendChild(f1); f1.submit();
-            }
-            if (finishBtn && confirm('Mark this transaction finished?')) {
-                var f2 = document.createElement('form');
-                f2.method = 'POST'; f2.action = finishBtn.getAttribute('data-url');
-                document.body.appendChild(f2); f2.submit();
-            }
+            if (verifyBtn) Pickers.confirmAndSubmit(verifyBtn.getAttribute('data-url'), 'Verify this transaction?');
+            if (finishBtn) Pickers.confirmAndSubmit(finishBtn.getAttribute('data-url'), 'Mark this transaction finished?');
             if (voidBtn) {
                 document.getElementById('voidReason').value = '';
                 voidForm.action = '/page/warehouse_transactions/' + voidBtn.closest('tr').getAttribute('data-id') + '/void';

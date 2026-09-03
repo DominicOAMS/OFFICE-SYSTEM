@@ -964,14 +964,6 @@
             OS.refreshIcons();
         }
 
-        function renumberItems() {
-            var rows = itemsList.querySelectorAll('.js-item-row');
-            rows.forEach(function (row, i) {
-                row.querySelector('.js-item-number').textContent = i + 1;
-                row.querySelector('.js-remove-item').classList.toggle('hidden', rows.length <= 1);
-            });
-        }
-
         /* ------------------------------------------------- serialization + totals */
 
         function syncItems() {
@@ -1009,7 +1001,7 @@
             var item = makeItem();
             items.push(item);
             appendItemRow(item);
-            renumberItems();
+            Pickers.renumberItems(itemsList);
             syncItems();
             return item;
         }
@@ -1018,7 +1010,7 @@
             var row = rowFor(uid);
             if (row) row.remove();
             items = items.filter(function (it) { return it.uid !== uid; });
-            renumberItems();
+            Pickers.renumberItems(itemsList);
             syncItems();
         }
 

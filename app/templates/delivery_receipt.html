@@ -410,14 +410,6 @@
             OS.refreshIcons();
         }
 
-        function renumberItems() {
-            var rows = itemsList.querySelectorAll('.js-item-row');
-            rows.forEach(function (row, i) {
-                row.querySelector('.js-item-number').textContent = i + 1;
-                row.querySelector('.js-remove-item').classList.toggle('hidden', rows.length <= 1);
-            });
-        }
-
         function syncItems() {
             fieldItemsJson.value = JSON.stringify(items.map(function (it) {
                 return {
@@ -432,7 +424,7 @@
             var item = makeItem();
             items.push(item);
             appendItemRow(item);
-            renumberItems();
+            Pickers.renumberItems(itemsList);
             syncItems();
             return item;
         }
@@ -441,7 +433,7 @@
             var row = rowFor(uid);
             if (row) row.remove();
             items = items.filter(function (it) { return it.uid !== uid; });
-            renumberItems();
+            Pickers.renumberItems(itemsList);
             syncItems();
         }
 
@@ -550,25 +542,9 @@
             var voidBtn = e.target.closest('.js-void');
 
             if (viewBtn) openView(viewBtn.closest('tr'));
-            if (printBtn && confirm('Mark this delivery receipt as printed?')) {
-                var f1 = document.createElement('form');
-                f1.method = 'POST'; f1.action = printBtn.getAttribute('data-url');
-                document.body.appendChild(f1); f1.submit();
-            }
-            if (finishBtn && confirm('Mark this delivery receipt as finished?')) {
-                var f2 = document.createElement('form');
-                f2.method = 'POST'; f2.action = finishBtn.getAttribute('data-url');
-                document.body.appendChild(f2); f2.submit();
-            }
-            if (voidBtn) {
-                var reason = prompt('Reason for voiding this delivery receipt (optional):') || '';
-                var f3 = document.createElement('form');
-                f3.method = 'POST'; f3.action = voidBtn.getAttribute('data-url');
-                var input = document.createElement('input');
-                input.type = 'hidden'; input.name = 'reason'; input.value = reason;
-                f3.appendChild(input);
-                document.body.appendChild(f3); f3.submit();
-            }
+            if (printBtn) Pickers.confirmAndSubmit(printBtn.getAttribute('data-url'), 'Mark this delivery receipt as printed?');
+            if (finishBtn) Pickers.confirmAndSubmit(finishBtn.getAttribute('data-url'), 'Mark this delivery receipt as finished?');
+            if (voidBtn) Pickers.promptAndSubmitWithReason(voidBtn.getAttribute('data-url'), 'Reason for voiding this delivery receipt (optional):');
         });
 
         var searchInput = document.getElementById('drSearch');
