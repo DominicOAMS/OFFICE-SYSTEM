@@ -63,6 +63,18 @@ def login_required(view):
     return wrapped
 
 
+def _parse_page_arg():
+    try:
+        return max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        return 1
+
+
+def _clamp_page(page, total, per_page):
+    page_count = max(1, -(-total // per_page))  # ceil
+    return min(page, page_count), page_count
+
+
 @main_bp.before_request
 def enforce_password_change():
     if request.endpoint in OPEN_ENDPOINTS:
@@ -399,16 +411,12 @@ def supplier_products(supplier_id):
     has_price_code = "priceCode" in request.args
     price_code = request.args.get("priceCode", "").strip()
 
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
+    page = _parse_page_arg()
 
     total = suppliers_repo.count_products_for_supplier(
         supplier_id, search or None, price_code, has_price_code
     )
-    page_count = max(1, -(-total // SUPPLIER_PRODUCTS_PER_PAGE))  # ceil
-    page = min(page, page_count)
+    page, page_count = _clamp_page(page, total, SUPPLIER_PRODUCTS_PER_PAGE)
 
     products = suppliers_repo.list_products_for_supplier(
         supplier_id,
@@ -955,14 +963,10 @@ def fuel_po():
     search = request.args.get("q", "").strip()
     status = request.args.get("status", "").strip()
 
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
+    page = _parse_page_arg()
 
     total = fuel_po_repo.count_fuel_pos(search or None, status or None)
-    page_count = max(1, -(-total // FUEL_PO_PER_PAGE))  # ceil
-    page = min(page, page_count)
+    page, page_count = _clamp_page(page, total, FUEL_PO_PER_PAGE)
 
     records = fuel_po_repo.list_fuel_pos(
         search=search or None,
@@ -1209,14 +1213,10 @@ def purchase_orders():
     search = request.args.get("q", "").strip()
     status = request.args.get("status", "").strip()
 
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
+    page = _parse_page_arg()
 
     total = purchase_orders_repo.count_purchase_orders(search or None, status or None)
-    page_count = max(1, -(-total // PURCHASE_ORDER_PER_PAGE))  # ceil
-    page = min(page, page_count)
+    page, page_count = _clamp_page(page, total, PURCHASE_ORDER_PER_PAGE)
 
     records = purchase_orders_repo.list_purchase_orders(
         search=search or None,
@@ -1576,14 +1576,10 @@ def warehouse_transactions():
     direction = request.args.get("direction", "").strip().upper()
     status = request.args.get("status", "").strip()
 
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
+    page = _parse_page_arg()
 
     total = warehouse_transactions_repo.count_transactions(search or None, direction or None, status or None)
-    page_count = max(1, -(-total // WAREHOUSE_TXN_PER_PAGE))  # ceil
-    page = min(page, page_count)
+    page, page_count = _clamp_page(page, total, WAREHOUSE_TXN_PER_PAGE)
 
     records = warehouse_transactions_repo.list_transactions(
         search=search or None,
@@ -2121,14 +2117,10 @@ def invoices():
     search = request.args.get("q", "").strip()
     status = request.args.get("status", "").strip()
     branch = request.args.get("branch", "").strip()
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
+    page = _parse_page_arg()
 
     total = invoices_repo.count_invoices(search or None, status or None, branch or None)
-    page_count = max(1, -(-total // INVOICE_PER_PAGE))  # ceil
-    page = min(page, page_count)
+    page, page_count = _clamp_page(page, total, INVOICE_PER_PAGE)
 
     records = invoices_repo.list_invoices(
         search=search or None,
@@ -2395,14 +2387,10 @@ def _po_for_picker(po):
 def _payables_list_page(has_po):
     search = request.args.get("q", "").strip()
     status = request.args.get("status", "").strip()
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
+    page = _parse_page_arg()
 
     total = payables_repo.count_payables(search or None, status or None, has_po)
-    page_count = max(1, -(-total // PAYABLES_PER_PAGE))  # ceil
-    page = min(page, page_count)
+    page, page_count = _clamp_page(page, total, PAYABLES_PER_PAGE)
 
     records = payables_repo.list_payables(
         search=search or None,
@@ -2532,14 +2520,10 @@ def _parse_voucher_form():
 def check_vouchers():
     search = request.args.get("q", "").strip()
     status = request.args.get("status", "").strip()
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
+    page = _parse_page_arg()
 
     total = check_vouchers_repo.count_vouchers(search or None, status or None)
-    page_count = max(1, -(-total // VOUCHER_PER_PAGE))  # ceil
-    page = min(page, page_count)
+    page, page_count = _clamp_page(page, total, VOUCHER_PER_PAGE)
 
     records = check_vouchers_repo.list_vouchers(
         search=search or None,
@@ -2736,14 +2720,10 @@ def _parse_collection_form():
 def receivables_collections():
     search = request.args.get("q", "").strip()
     status = request.args.get("status", "").strip()
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
+    page = _parse_page_arg()
 
     total = collections_repo.count_collections(search or None, status or None)
-    page_count = max(1, -(-total // COLLECTIONS_PER_PAGE))  # ceil
-    page = min(page, page_count)
+    page, page_count = _clamp_page(page, total, COLLECTIONS_PER_PAGE)
 
     records = collections_repo.list_collections(
         search=search or None,
@@ -2821,14 +2801,10 @@ def receivables_collectibles():
     """Read-only filtered view of Invoices - everything not yet Paid or Void. Nothing is
     'created' here, so there's no add route, just a link into Collections' own Add flow."""
     search = request.args.get("q", "").strip()
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
+    page = _parse_page_arg()
 
     total = invoices_repo.count_invoices(search or None, None, None, outstanding_only=True)
-    page_count = max(1, -(-total // COLLECTIBLES_PER_PAGE))  # ceil
-    page = min(page, page_count)
+    page, page_count = _clamp_page(page, total, COLLECTIBLES_PER_PAGE)
 
     records = invoices_repo.list_invoices(
         search=search or None,
@@ -3012,14 +2988,10 @@ def _parse_delivery_receipt_form():
 def delivery_receipt():
     search = request.args.get("q", "").strip()
     status = request.args.get("status", "").strip()
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
+    page = _parse_page_arg()
 
     total = delivery_receipts_repo.count_delivery_receipts(search or None, status or None)
-    page_count = max(1, -(-total // DELIVERY_RECEIPT_PER_PAGE))  # ceil
-    page = min(page, page_count)
+    page, page_count = _clamp_page(page, total, DELIVERY_RECEIPT_PER_PAGE)
 
     records = delivery_receipts_repo.list_delivery_receipts(
         search=search or None,
@@ -3127,14 +3099,10 @@ def _parse_gatepass_form():
 def delivery_gatepass():
     search = request.args.get("q", "").strip()
     status = request.args.get("status", "").strip()
-    try:
-        page = max(1, int(request.args.get("page", 1)))
-    except ValueError:
-        page = 1
+    page = _parse_page_arg()
 
     total = gatepasses_repo.count_gatepasses(search or None, status or None)
-    page_count = max(1, -(-total // DELIVERY_GATEPASS_PER_PAGE))  # ceil
-    page = min(page, page_count)
+    page, page_count = _clamp_page(page, total, DELIVERY_GATEPASS_PER_PAGE)
 
     records = gatepasses_repo.list_gatepasses(
         search=search or None,

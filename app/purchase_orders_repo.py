@@ -1,6 +1,6 @@
 from datetime import date
 
-from .db import get_connection
+from .db import get_connection, get_cursor
 
 _PO_COLUMNS = """
     po.*,
@@ -37,64 +37,48 @@ def _filter_clauses(search, status):
 
 
 def count_purchase_orders(search=None, status=None):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT COUNT(*) AS n" + _PO_FROM
-            extra_sql, params = _filter_clauses(search, status)
-            cur.execute(sql + extra_sql, params)
-            return cur.fetchone()["n"]
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT COUNT(*) AS n" + _PO_FROM
+        extra_sql, params = _filter_clauses(search, status)
+        cur.execute(sql + extra_sql, params)
+        return cur.fetchone()["n"]
 
 
 def list_purchase_orders(search=None, status=None, limit=None, offset=0):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT " + _PO_COLUMNS + _PO_FROM
-            extra_sql, params = _filter_clauses(search, status)
-            sql += extra_sql + " ORDER BY po.id DESC"
-            if limit is not None:
-                sql += " LIMIT %s OFFSET %s"
-                params = params + [int(limit), int(offset)]
-            cur.execute(sql, params)
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT " + _PO_COLUMNS + _PO_FROM
+        extra_sql, params = _filter_clauses(search, status)
+        sql += extra_sql + " ORDER BY po.id DESC"
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params = params + [int(limit), int(offset)]
+        cur.execute(sql, params)
+        return cur.fetchall()
 
 
 def get_purchase_order(po_id):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT " + _PO_COLUMNS + _PO_FROM + " WHERE po.id = %s LIMIT 1",
-                (po_id,),
-            )
-            return cur.fetchone()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT " + _PO_COLUMNS + _PO_FROM + " WHERE po.id = %s LIMIT 1",
+            (po_id,),
+        )
+        return cur.fetchone()
 
 
 def list_active_inventory_items():
     """Same catalog customers_repo.list_active_inventory_items() reads, but this one
     also selects id - Purchase Order line items store itemId as a real FK, which the
     customer-products picker never needed."""
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, catalog, description, category, groupType, baseUnit, salesUnit, purchaseUnit, packSize
-                FROM tbl_inventory_items
-                WHERE isDeleted = 0 AND status = 'AC'
-                ORDER BY catalog ASC
-                """
-            )
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, catalog, description, category, groupType, baseUnit, salesUnit, purchaseUnit, packSize
+            FROM tbl_inventory_items
+            WHERE isDeleted = 0 AND status = 'AC'
+            ORDER BY catalog ASC
+            """
+        )
+        return cur.fetchall()
 
 
 def _next_po_number(cur, year):
@@ -229,20 +213,16 @@ def list_items_for_purchase_orders(po_ids):
         return {}
     placeholders = ", ".join(["%s"] * len(po_ids))
 
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT * FROM tbl_purchase_order_items
-                WHERE purchaseOrderId IN ({placeholders})
-                ORDER BY purchaseOrderId ASC, sequence ASC
-                """,
-                po_ids,
-            )
-            items = cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT * FROM tbl_purchase_order_items
+            WHERE purchaseOrderId IN ({placeholders})
+            ORDER BY purchaseOrderId ASC, sequence ASC
+            """,
+            po_ids,
+        )
+        items = cur.fetchall()
 
     items_by_po = {}
     for item in items:
@@ -265,22 +245,18 @@ def list_allocations_for_items(item_ids):
         return {}
     placeholders = ", ".join(["%s"] * len(item_ids))
 
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT a.*, c.code AS customerCode, c.name AS customerName
-                FROM tbl_purchase_order_item_allocations a
-                JOIN tbl_customers c ON c.id = a.customerId
-                WHERE a.purchaseOrderItemId IN ({placeholders})
-                ORDER BY a.purchaseOrderItemId ASC, a.id ASC
-                """,
-                item_ids,
-            )
-            allocations = cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT a.*, c.code AS customerCode, c.name AS customerName
+            FROM tbl_purchase_order_item_allocations a
+            JOIN tbl_customers c ON c.id = a.customerId
+            WHERE a.purchaseOrderItemId IN ({placeholders})
+            ORDER BY a.purchaseOrderItemId ASC, a.id ASC
+            """,
+            item_ids,
+        )
+        allocations = cur.fetchall()
 
     by_item = {}
     for alloc in allocations:
@@ -289,46 +265,34 @@ def list_allocations_for_items(item_ids):
 
 
 def soft_delete_purchase_order(po_id, updated_by):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE tbl_purchase_orders SET isDeleted = 1, updatedBy = %s, updatedAt = NOW() WHERE id = %s",
-                (updated_by, po_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            "UPDATE tbl_purchase_orders SET isDeleted = 1, updatedBy = %s, updatedAt = NOW() WHERE id = %s",
+            (updated_by, po_id),
+        )
 
 
 def approve(po_id, approved_by, remarks):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_purchase_orders
-                SET status = 'Approved', approverActionAt = NOW(), approverRemarks = %s,
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (remarks, approved_by, po_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_purchase_orders
+            SET status = 'Approved', approverActionAt = NOW(), approverRemarks = %s,
+                updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (remarks, approved_by, po_id),
+        )
 
 
 def reject(po_id, rejected_by, remarks):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_purchase_orders
-                SET status = 'Rejected', approverActionAt = NOW(), approverRemarks = %s,
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (remarks, rejected_by, po_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_purchase_orders
+            SET status = 'Rejected', approverActionAt = NOW(), approverRemarks = %s,
+                updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (remarks, rejected_by, po_id),
+        )

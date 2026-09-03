@@ -1,16 +1,12 @@
-from .db import get_connection
+from .db import get_cursor
 
 
 def list_menu_groups():
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM tbl_users_folder ORDER BY pf_order ASC")
-            folders = cur.fetchall()
-            cur.execute("SELECT * FROM tbl_users_menu ORDER BY id ASC")
-            menus = cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute("SELECT * FROM tbl_users_folder ORDER BY pf_order ASC")
+        folders = cur.fetchall()
+        cur.execute("SELECT * FROM tbl_users_menu ORDER BY id ASC")
+        menus = cur.fetchall()
 
     menus_by_folder = {}
     for menu in menus:

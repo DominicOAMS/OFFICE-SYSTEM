@@ -1,4 +1,4 @@
-from .db import get_connection
+from .db import get_connection, get_cursor
 
 _TXN_COLUMNS = """
     t.*,
@@ -43,44 +43,32 @@ def _filter_clauses(search, direction, status):
 
 
 def count_transactions(search=None, direction=None, status=None):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT COUNT(*) AS n" + _TXN_FROM
-            extra_sql, params = _filter_clauses(search, direction, status)
-            cur.execute(sql + extra_sql, params)
-            return cur.fetchone()["n"]
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT COUNT(*) AS n" + _TXN_FROM
+        extra_sql, params = _filter_clauses(search, direction, status)
+        cur.execute(sql + extra_sql, params)
+        return cur.fetchone()["n"]
 
 
 def list_transactions(search=None, direction=None, status=None, limit=None, offset=0):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT " + _TXN_COLUMNS + _TXN_FROM
-            extra_sql, params = _filter_clauses(search, direction, status)
-            sql += extra_sql + " ORDER BY t.id DESC"
-            if limit is not None:
-                sql += " LIMIT %s OFFSET %s"
-                params = params + [int(limit), int(offset)]
-            cur.execute(sql, params)
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT " + _TXN_COLUMNS + _TXN_FROM
+        extra_sql, params = _filter_clauses(search, direction, status)
+        sql += extra_sql + " ORDER BY t.id DESC"
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params = params + [int(limit), int(offset)]
+        cur.execute(sql, params)
+        return cur.fetchall()
 
 
 def get_transaction(txn_id):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT " + _TXN_COLUMNS + _TXN_FROM + " WHERE t.id = %s LIMIT 1",
-                (txn_id,),
-            )
-            return cur.fetchone()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT " + _TXN_COLUMNS + _TXN_FROM + " WHERE t.id = %s LIMIT 1",
+            (txn_id,),
+        )
+        return cur.fetchone()
 
 
 def insert_transaction(cur, data, created_by):
@@ -270,21 +258,17 @@ def list_last_supplier_invoice_by_supplier():
     supplier - a global max would suggest a nonsense value for the next supplier picked
     (one supplier's invoices run ~955000000, another's run ~180822000000).
     """
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT po.supplierId, MAX(CAST(wt.supplierInvoice AS UNSIGNED)) AS lastNumber
-                FROM tbl_warehouse_transactions wt
-                JOIN tbl_purchase_orders po ON po.id = wt.purchaseOrderId
-                WHERE wt.supplierInvoice REGEXP '^[0-9]+$' AND wt.isDeleted = 0
-                GROUP BY po.supplierId
-                """
-            )
-            return {row["supplierId"]: row["lastNumber"] for row in cur.fetchall()}
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT po.supplierId, MAX(CAST(wt.supplierInvoice AS UNSIGNED)) AS lastNumber
+            FROM tbl_warehouse_transactions wt
+            JOIN tbl_purchase_orders po ON po.id = wt.purchaseOrderId
+            WHERE wt.supplierInvoice REGEXP '^[0-9]+$' AND wt.isDeleted = 0
+            GROUP BY po.supplierId
+            """
+        )
+        return {row["supplierId"]: row["lastNumber"] for row in cur.fetchall()}
 
 
 def list_items_for_transactions(txn_ids):
@@ -296,20 +280,16 @@ def list_items_for_transactions(txn_ids):
         return {}
     placeholders = ", ".join(["%s"] * len(txn_ids))
 
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT * FROM tbl_warehouse_transaction_items
-                WHERE transactionId IN ({placeholders})
-                ORDER BY transactionId ASC, sequence ASC
-                """,
-                txn_ids,
-            )
-            items = cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT * FROM tbl_warehouse_transaction_items
+            WHERE transactionId IN ({placeholders})
+            ORDER BY transactionId ASC, sequence ASC
+            """,
+            txn_ids,
+        )
+        items = cur.fetchall()
 
     items_by_txn = {}
     for item in items:
@@ -331,21 +311,17 @@ def list_transactions_for_invoices(invoice_ids):
         return {}
     placeholders = ", ".join(["%s"] * len(invoice_ids))
 
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT id, invoiceId, direction, status, createdAt
-                FROM tbl_warehouse_transactions
-                WHERE invoiceId IN ({placeholders}) AND isDeleted = 0
-                ORDER BY id ASC
-                """,
-                invoice_ids,
-            )
-            rows = cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT id, invoiceId, direction, status, createdAt
+            FROM tbl_warehouse_transactions
+            WHERE invoiceId IN ({placeholders}) AND isDeleted = 0
+            ORDER BY id ASC
+            """,
+            invoice_ids,
+        )
+        rows = cur.fetchall()
 
     txns_by_invoice = {}
     for row in rows:
@@ -378,46 +354,34 @@ def void(txn_id, voided_by, reason):
     only counts status='Finished' rows, voiding one automatically removes it from computed
     on-hand quantities without any other code needing to change.
     """
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            mark_void(cur, txn_id, voided_by, reason)
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        mark_void(cur, txn_id, voided_by, reason)
 
 
 def verify(txn_id, verified_by):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_warehouse_transactions
-                SET status = 'Verified', verifiedBy = %s, verifiedAt = NOW(),
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (verified_by, verified_by, txn_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_warehouse_transactions
+            SET status = 'Verified', verifiedBy = %s, verifiedAt = NOW(),
+                updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (verified_by, verified_by, txn_id),
+        )
 
 
 def finish(txn_id, finished_by):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_warehouse_transactions
-                SET status = 'Finished', finishedBy = %s, finishedAt = NOW(),
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (finished_by, finished_by, txn_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_warehouse_transactions
+            SET status = 'Finished', finishedBy = %s, finishedAt = NOW(),
+                updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (finished_by, finished_by, txn_id),
+        )
 
 
 def list_stock_balances():
@@ -429,32 +393,28 @@ def list_stock_balances():
     by a healthy lot of the same item - the legacy snapshot had 13 such negative lots,
     real evidence of historical over-issuance that a naive item-level SUM would hide.
     """
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    wi.itemId,
-                    COALESCE(inv.catalog, wi.catalogCode) AS catalogCode,
-                    COALESCE(inv.description, wi.description) AS description,
-                    COALESCE(inv.category, wi.category) AS category,
-                    wi.unit,
-                    wt.branch,
-                    wi.lot,
-                    wi.expiryDate,
-                    GREATEST(0, COALESCE(SUM(
-                        CASE WHEN wt.direction = 'IN' THEN wi.quantity ELSE -wi.quantity END
-                    ), 0)) AS onHand
-                FROM tbl_warehouse_transaction_items wi
-                JOIN tbl_warehouse_transactions wt ON wt.id = wi.transactionId
-                LEFT JOIN tbl_inventory_items inv ON inv.id = wi.itemId
-                WHERE wt.status = 'Finished' AND wt.isDeleted = 0
-                GROUP BY wi.itemId, catalogCode, description, category, wi.unit,
-                         wt.branch, wi.lot, wi.expiryDate
-                ORDER BY catalogCode ASC
-                """
-            )
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                wi.itemId,
+                COALESCE(inv.catalog, wi.catalogCode) AS catalogCode,
+                COALESCE(inv.description, wi.description) AS description,
+                COALESCE(inv.category, wi.category) AS category,
+                wi.unit,
+                wt.branch,
+                wi.lot,
+                wi.expiryDate,
+                GREATEST(0, COALESCE(SUM(
+                    CASE WHEN wt.direction = 'IN' THEN wi.quantity ELSE -wi.quantity END
+                ), 0)) AS onHand
+            FROM tbl_warehouse_transaction_items wi
+            JOIN tbl_warehouse_transactions wt ON wt.id = wi.transactionId
+            LEFT JOIN tbl_inventory_items inv ON inv.id = wi.itemId
+            WHERE wt.status = 'Finished' AND wt.isDeleted = 0
+            GROUP BY wi.itemId, catalogCode, description, category, wi.unit,
+                     wt.branch, wi.lot, wi.expiryDate
+            ORDER BY catalogCode ASC
+            """
+        )
+        return cur.fetchall()

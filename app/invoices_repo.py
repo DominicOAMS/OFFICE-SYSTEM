@@ -1,7 +1,7 @@
 from pymysql.err import IntegrityError
 
 from . import warehouse_transactions_repo
-from .db import get_connection
+from .db import get_connection, get_cursor
 
 # Pricing is VAT-INCLUSIVE (confirmed against the legacy data: SUM(line Amount) per invoice
 # equals AmountDue, not Vatable - i.e. Vatable is back-calculated as AmountDue / 1.12). This
@@ -65,61 +65,45 @@ def _filter_clauses(search, status, branch, outstanding_only=False):
 
 
 def count_invoices(search=None, status=None, branch=None, outstanding_only=False):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT COUNT(*) AS n" + _INV_FROM
-            extra_sql, params = _filter_clauses(search, status, branch, outstanding_only)
-            cur.execute(sql + extra_sql, params)
-            return cur.fetchone()["n"]
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT COUNT(*) AS n" + _INV_FROM
+        extra_sql, params = _filter_clauses(search, status, branch, outstanding_only)
+        cur.execute(sql + extra_sql, params)
+        return cur.fetchone()["n"]
 
 
 def list_invoices(search=None, status=None, branch=None, limit=None, offset=0, outstanding_only=False):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT " + _INV_COLUMNS + _INV_FROM
-            extra_sql, params = _filter_clauses(search, status, branch, outstanding_only)
-            sql += extra_sql + " ORDER BY i.id DESC"
-            if limit is not None:
-                sql += " LIMIT %s OFFSET %s"
-                params = params + [int(limit), int(offset)]
-            cur.execute(sql, params)
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT " + _INV_COLUMNS + _INV_FROM
+        extra_sql, params = _filter_clauses(search, status, branch, outstanding_only)
+        sql += extra_sql + " ORDER BY i.id DESC"
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params = params + [int(limit), int(offset)]
+        cur.execute(sql, params)
+        return cur.fetchall()
 
 
 def list_invoices_for_customer(customer_id):
     """Every non-deleted invoice for one customer, unpaginated - feeds the Statement of
     Account report, where one customer's full history is always a small, boundable list
     (unlike the main Invoices page, which needs real pagination over 8,000+ rows)."""
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT " + _INV_COLUMNS + _INV_FROM
-                + " WHERE i.isDeleted = 0 AND i.customerId = %s ORDER BY i.invoiceDate ASC, i.id ASC",
-                (customer_id,),
-            )
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT " + _INV_COLUMNS + _INV_FROM
+            + " WHERE i.isDeleted = 0 AND i.customerId = %s ORDER BY i.invoiceDate ASC, i.id ASC",
+            (customer_id,),
+        )
+        return cur.fetchall()
 
 
 def get_invoice(invoice_id):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT " + _INV_COLUMNS + _INV_FROM + " WHERE i.id = %s LIMIT 1",
-                (invoice_id,),
-            )
-            return cur.fetchone()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT " + _INV_COLUMNS + _INV_FROM + " WHERE i.id = %s LIMIT 1",
+            (invoice_id,),
+        )
+        return cur.fetchone()
 
 
 def list_items_for_invoices(invoice_ids):
@@ -131,20 +115,16 @@ def list_items_for_invoices(invoice_ids):
         return {}
     placeholders = ", ".join(["%s"] * len(invoice_ids))
 
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT * FROM tbl_invoice_items
-                WHERE invoiceId IN ({placeholders})
-                ORDER BY invoiceId ASC, sequence ASC
-                """,
-                invoice_ids,
-            )
-            items = cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT * FROM tbl_invoice_items
+            WHERE invoiceId IN ({placeholders})
+            ORDER BY invoiceId ASC, sequence ASC
+            """,
+            invoice_ids,
+        )
+        items = cur.fetchall()
 
     items_by_invoice = {}
     for item in items:
@@ -390,54 +370,42 @@ def update_invoice(invoice_id, data, updated_by):
 
 
 def mark_printed(invoice_id, printed_by):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_invoices
-                SET status = 'Printed', printedBy = %s, printedAt = NOW(),
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (printed_by, printed_by, invoice_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_invoices
+            SET status = 'Printed', printedBy = %s, printedAt = NOW(),
+                updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (printed_by, printed_by, invoice_id),
+        )
 
 
 def mark_delivered(invoice_id, delivered_by):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_invoices
-                SET status = 'Delivered', deliveredBy = %s, deliveredAt = NOW(),
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (delivered_by, delivered_by, invoice_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_invoices
+            SET status = 'Delivered', deliveredBy = %s, deliveredAt = NOW(),
+                updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (delivered_by, delivered_by, invoice_id),
+        )
 
 
 def mark_paid(invoice_id, paid_by):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_invoices
-                SET status = 'Paid', paidBy = %s, paidAt = NOW(),
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (paid_by, paid_by, invoice_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_invoices
+            SET status = 'Paid', paidBy = %s, paidAt = NOW(),
+                updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (paid_by, paid_by, invoice_id),
+        )
 
 
 def void_invoice(invoice_id, voided_by, reason):

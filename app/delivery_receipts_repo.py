@@ -1,4 +1,4 @@
-from .db import get_connection
+from .db import get_connection, get_cursor
 
 _DR_COLUMNS = """
     r.*,
@@ -37,44 +37,32 @@ def _filter_clauses(search, status):
 
 
 def count_delivery_receipts(search=None, status=None):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT COUNT(*) AS n" + _DR_FROM
-            extra_sql, params = _filter_clauses(search, status)
-            cur.execute(sql + extra_sql, params)
-            return cur.fetchone()["n"]
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT COUNT(*) AS n" + _DR_FROM
+        extra_sql, params = _filter_clauses(search, status)
+        cur.execute(sql + extra_sql, params)
+        return cur.fetchone()["n"]
 
 
 def list_delivery_receipts(search=None, status=None, limit=None, offset=0):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT " + _DR_COLUMNS + _DR_FROM
-            extra_sql, params = _filter_clauses(search, status)
-            sql += extra_sql + " ORDER BY r.id DESC"
-            if limit is not None:
-                sql += " LIMIT %s OFFSET %s"
-                params = params + [int(limit), int(offset)]
-            cur.execute(sql, params)
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT " + _DR_COLUMNS + _DR_FROM
+        extra_sql, params = _filter_clauses(search, status)
+        sql += extra_sql + " ORDER BY r.id DESC"
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params = params + [int(limit), int(offset)]
+        cur.execute(sql, params)
+        return cur.fetchall()
 
 
 def get_delivery_receipt(dr_id):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT " + _DR_COLUMNS + _DR_FROM + " WHERE r.id = %s LIMIT 1",
-                (dr_id,),
-            )
-            return cur.fetchone()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT " + _DR_COLUMNS + _DR_FROM + " WHERE r.id = %s LIMIT 1",
+            (dr_id,),
+        )
+        return cur.fetchone()
 
 
 def list_items_for_delivery_receipts(dr_ids):
@@ -82,24 +70,20 @@ def list_items_for_delivery_receipts(dr_ids):
     invoices_repo.list_items_for_invoices."""
     if not dr_ids:
         return {}
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            placeholders = ",".join(["%s"] * len(dr_ids))
-            cur.execute(
-                f"""
-                SELECT * FROM tbl_delivery_receipt_items
-                WHERE deliveryReceiptId IN ({placeholders})
-                ORDER BY deliveryReceiptId, sequence
-                """,
-                dr_ids,
-            )
-            result = {}
-            for row in cur.fetchall():
-                result.setdefault(row["deliveryReceiptId"], []).append(row)
-            return result
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        placeholders = ",".join(["%s"] * len(dr_ids))
+        cur.execute(
+            f"""
+            SELECT * FROM tbl_delivery_receipt_items
+            WHERE deliveryReceiptId IN ({placeholders})
+            ORDER BY deliveryReceiptId, sequence
+            """,
+            dr_ids,
+        )
+        result = {}
+        for row in cur.fetchall():
+            result.setdefault(row["deliveryReceiptId"], []).append(row)
+        return result
 
 
 def _next_dr_number(cur):
@@ -172,49 +156,37 @@ def create_delivery_receipt(data, created_by):
 
 
 def mark_printed(dr_id, printed_by):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_delivery_receipts
-                SET status = 'Printed', updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (printed_by, dr_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_delivery_receipts
+            SET status = 'Printed', updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (printed_by, dr_id),
+        )
 
 
 def mark_finished(dr_id, finished_by):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_delivery_receipts
-                SET status = 'Finished', updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (finished_by, dr_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_delivery_receipts
+            SET status = 'Finished', updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (finished_by, dr_id),
+        )
 
 
 def void(dr_id, voided_by, reason):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_delivery_receipts
-                SET status = 'Void', voidedBy = %s, voidedAt = NOW(), voidReason = %s,
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (voided_by, reason, voided_by, dr_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_delivery_receipts
+            SET status = 'Void', voidedBy = %s, voidedAt = NOW(), voidReason = %s,
+                updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (voided_by, reason, voided_by, dr_id),
+        )

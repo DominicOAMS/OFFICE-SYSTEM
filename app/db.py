@@ -1,4 +1,5 @@
 import os
+from contextlib import contextmanager
 
 import pymysql
 from dotenv import load_dotenv
@@ -29,3 +30,17 @@ def get_connection():
         cursorclass=DictCursor,
         autocommit=True,
     )
+
+
+@contextmanager
+def get_cursor():
+    """A connection + cursor for a single autocommitted statement (or batch of
+    statements not needing cross-table atomicity). Functions that need explicit
+    transaction control (conn.begin()/commit()/rollback()) still take get_connection()
+    directly - this is only for the single-connection get/count/list/update shape."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            yield cur
+    finally:
+        conn.close()

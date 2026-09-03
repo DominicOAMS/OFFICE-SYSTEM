@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from .db import get_connection
+from .db import get_connection, get_cursor
 
 _VOUCHER_COLUMNS = """
     cv.*,
@@ -38,44 +38,32 @@ def _filter_clauses(search, status):
 
 
 def count_vouchers(search=None, status=None):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT COUNT(*) AS n" + _VOUCHER_FROM
-            extra_sql, params = _filter_clauses(search, status)
-            cur.execute(sql + extra_sql, params)
-            return cur.fetchone()["n"]
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT COUNT(*) AS n" + _VOUCHER_FROM
+        extra_sql, params = _filter_clauses(search, status)
+        cur.execute(sql + extra_sql, params)
+        return cur.fetchone()["n"]
 
 
 def list_vouchers(search=None, status=None, limit=None, offset=0):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT " + _VOUCHER_COLUMNS + _VOUCHER_FROM
-            extra_sql, params = _filter_clauses(search, status)
-            sql += extra_sql + " ORDER BY cv.id DESC"
-            if limit is not None:
-                sql += " LIMIT %s OFFSET %s"
-                params = params + [int(limit), int(offset)]
-            cur.execute(sql, params)
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT " + _VOUCHER_COLUMNS + _VOUCHER_FROM
+        extra_sql, params = _filter_clauses(search, status)
+        sql += extra_sql + " ORDER BY cv.id DESC"
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params = params + [int(limit), int(offset)]
+        cur.execute(sql, params)
+        return cur.fetchall()
 
 
 def get_voucher(voucher_id):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT " + _VOUCHER_COLUMNS + _VOUCHER_FROM + " WHERE cv.id = %s LIMIT 1",
-                (voucher_id,),
-            )
-            return cur.fetchone()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT " + _VOUCHER_COLUMNS + _VOUCHER_FROM + " WHERE cv.id = %s LIMIT 1",
+            (voucher_id,),
+        )
+        return cur.fetchone()
 
 
 def list_payables_for_vouchers(voucher_ids):
@@ -84,26 +72,22 @@ def list_payables_for_vouchers(voucher_ids):
     invoices_repo.list_items_for_invoices."""
     if not voucher_ids:
         return {}
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            placeholders = ",".join(["%s"] * len(voucher_ids))
-            cur.execute(
-                f"""
-                SELECT cvp.voucherId, ap.*
-                FROM tbl_check_voucher_payables cvp
-                JOIN tbl_account_payables ap ON ap.id = cvp.payableId
-                WHERE cvp.voucherId IN ({placeholders})
-                ORDER BY ap.id ASC
-                """,
-                voucher_ids,
-            )
-            result = {}
-            for row in cur.fetchall():
-                result.setdefault(row["voucherId"], []).append(row)
-            return result
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        placeholders = ",".join(["%s"] * len(voucher_ids))
+        cur.execute(
+            f"""
+            SELECT cvp.voucherId, ap.*
+            FROM tbl_check_voucher_payables cvp
+            JOIN tbl_account_payables ap ON ap.id = cvp.payableId
+            WHERE cvp.voucherId IN ({placeholders})
+            ORDER BY ap.id ASC
+            """,
+            voucher_ids,
+        )
+        result = {}
+        for row in cur.fetchall():
+            result.setdefault(row["voucherId"], []).append(row)
+        return result
 
 
 def _next_voucher_number(cur, year):
@@ -194,37 +178,29 @@ def create_voucher(data, created_by):
 
 
 def mark_checked(voucher_id, checked_by):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_check_vouchers
-                SET status = 'Checked', checkedBy = %s, checkedAt = NOW(),
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (checked_by, checked_by, voucher_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_check_vouchers
+            SET status = 'Checked', checkedBy = %s, checkedAt = NOW(),
+                updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (checked_by, checked_by, voucher_id),
+        )
 
 
 def mark_approved(voucher_id, approved_by):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_check_vouchers
-                SET status = 'Approved', approvedBy = %s, approvedAt = NOW(),
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (approved_by, approved_by, voucher_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_check_vouchers
+            SET status = 'Approved', approvedBy = %s, approvedAt = NOW(),
+                updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (approved_by, approved_by, voucher_id),
+        )
 
 
 def mark_paid(voucher_id, paid_by, check_number):
@@ -265,17 +241,13 @@ def void(voucher_id, voided_by, reason):
     """No cascade needed - a payable's "claimed" status is computed live off whether
     its voucher is non-Void, not stored redundantly on the payable row, so voiding here
     automatically frees every linked payable to be picked by a new voucher."""
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE tbl_check_vouchers
-                SET status = 'Void', voidedBy = %s, voidedAt = NOW(), voidReason = %s,
-                    updatedBy = %s, updatedAt = NOW()
-                WHERE id = %s
-                """,
-                (voided_by, reason, voided_by, voucher_id),
-            )
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tbl_check_vouchers
+            SET status = 'Void', voidedBy = %s, voidedAt = NOW(), voidReason = %s,
+                updatedBy = %s, updatedAt = NOW()
+            WHERE id = %s
+            """,
+            (voided_by, reason, voided_by, voucher_id),
+        )

@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from .db import get_connection
+from .db import get_connection, get_cursor
 
 _COLLECTION_COLUMNS = """
     col.*,
@@ -31,60 +31,44 @@ def _filter_clauses(search, status):
 
 
 def count_collections(search=None, status=None):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT COUNT(*) AS n" + _COLLECTION_FROM
-            extra_sql, params = _filter_clauses(search, status)
-            cur.execute(sql + extra_sql, params)
-            return cur.fetchone()["n"]
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT COUNT(*) AS n" + _COLLECTION_FROM
+        extra_sql, params = _filter_clauses(search, status)
+        cur.execute(sql + extra_sql, params)
+        return cur.fetchone()["n"]
 
 
 def list_collections(search=None, status=None, limit=None, offset=0):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            sql = "SELECT " + _COLLECTION_COLUMNS + _COLLECTION_FROM
-            extra_sql, params = _filter_clauses(search, status)
-            sql += extra_sql + " ORDER BY col.id DESC"
-            if limit is not None:
-                sql += " LIMIT %s OFFSET %s"
-                params = params + [int(limit), int(offset)]
-            cur.execute(sql, params)
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        sql = "SELECT " + _COLLECTION_COLUMNS + _COLLECTION_FROM
+        extra_sql, params = _filter_clauses(search, status)
+        sql += extra_sql + " ORDER BY col.id DESC"
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params = params + [int(limit), int(offset)]
+        cur.execute(sql, params)
+        return cur.fetchall()
 
 
 def list_collections_for_customer(customer_id):
     """Every non-deleted collection for one customer, unpaginated - feeds the Statement of
     Account report alongside invoices_repo.list_invoices_for_customer."""
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT " + _COLLECTION_COLUMNS + _COLLECTION_FROM
-                + " WHERE col.isDeleted = 0 AND col.customerId = %s ORDER BY col.dateCollected ASC, col.id ASC",
-                (customer_id,),
-            )
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT " + _COLLECTION_COLUMNS + _COLLECTION_FROM
+            + " WHERE col.isDeleted = 0 AND col.customerId = %s ORDER BY col.dateCollected ASC, col.id ASC",
+            (customer_id,),
+        )
+        return cur.fetchall()
 
 
 def get_collection(collection_id):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT " + _COLLECTION_COLUMNS + _COLLECTION_FROM + " WHERE col.id = %s LIMIT 1",
-                (collection_id,),
-            )
-            return cur.fetchone()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT " + _COLLECTION_COLUMNS + _COLLECTION_FROM + " WHERE col.id = %s LIMIT 1",
+            (collection_id,),
+        )
+        return cur.fetchone()
 
 
 def list_invoices_for_collections(collection_ids):
@@ -93,51 +77,43 @@ def list_invoices_for_collections(collection_ids):
     check_vouchers_repo.list_payables_for_vouchers."""
     if not collection_ids:
         return {}
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            placeholders = ",".join(["%s"] * len(collection_ids))
-            cur.execute(
-                f"""
-                SELECT ci.collectionId, i.*
-                FROM tbl_collection_invoices ci
-                JOIN tbl_invoices i ON i.id = ci.invoiceId
-                WHERE ci.collectionId IN ({placeholders})
-                ORDER BY i.id ASC
-                """,
-                collection_ids,
-            )
-            result = {}
-            for row in cur.fetchall():
-                result.setdefault(row["collectionId"], []).append(row)
-            return result
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        placeholders = ",".join(["%s"] * len(collection_ids))
+        cur.execute(
+            f"""
+            SELECT ci.collectionId, i.*
+            FROM tbl_collection_invoices ci
+            JOIN tbl_invoices i ON i.id = ci.invoiceId
+            WHERE ci.collectionId IN ({placeholders})
+            ORDER BY i.id ASC
+            """,
+            collection_ids,
+        )
+        result = {}
+        for row in cur.fetchall():
+            result.setdefault(row["collectionId"], []).append(row)
+        return result
 
 
 def list_uncollected_delivered_invoices_for_customer(customer_id):
     """Feeds the Collection Add form's invoice picker: a customer's Delivered invoices not
     already claimed by a non-Void collection."""
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT i.*
-                FROM tbl_invoices i
-                WHERE i.customerId = %s AND i.status = 'Delivered' AND i.isDeleted = 0
-                  AND i.id NOT IN (
-                      SELECT ci.invoiceId FROM tbl_collection_invoices ci
-                      JOIN tbl_collections c ON c.id = ci.collectionId
-                      WHERE c.status != 'Void'
-                  )
-                ORDER BY i.id ASC
-                """,
-                (customer_id,),
-            )
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with get_cursor() as cur:
+        cur.execute(
+            """
+            SELECT i.*
+            FROM tbl_invoices i
+            WHERE i.customerId = %s AND i.status = 'Delivered' AND i.isDeleted = 0
+              AND i.id NOT IN (
+                  SELECT ci.invoiceId FROM tbl_collection_invoices ci
+                  JOIN tbl_collections c ON c.id = ci.collectionId
+                  WHERE c.status != 'Void'
+              )
+            ORDER BY i.id ASC
+            """,
+            (customer_id,),
+        )
+        return cur.fetchall()
 
 
 def create_collection(data, created_by):
