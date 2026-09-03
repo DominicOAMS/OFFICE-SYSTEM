@@ -25,6 +25,7 @@ from . import (
     check_vouchers_repo,
     collections_repo,
     customers_repo,
+    dashboard_stats,
     fuel_approvers_repo,
     fuel_po_repo,
     fuel_prices_repo,
@@ -128,7 +129,7 @@ def change_password():
 @main_bp.route("/dashboard")
 @login_required
 def dashboard():
-    return render_template("dashboard.html")
+    return render_template("dashboard.html", stats=dashboard_stats.get_dashboard_stats())
 
 
 def _parse_customer_form():

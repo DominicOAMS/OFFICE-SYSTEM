@@ -15,21 +15,17 @@
                 Here's an overview of your workspace.
             </p>
         </div>
-        <span class="badge badge-warning">
-            <i data-lucide="info" class="h-3 w-3"></i>
-            Sample figures &mdash; not yet connected to data
-        </span>
     </div>
 
     <!-- Stat cards -->
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {% set stats = [
-            ('Purchase Requests', '0', 'clipboard-list', 'brand',  'Awaiting approval'),
-            ('Purchase Orders',   '0', 'shopping-cart',  'accent', 'Open this month'),
-            ('Invoices',          '0', 'file-text',      'brand',  'Issued this month'),
-            ('Stock Items',       '0', 'boxes',          'accent', 'Tracked in warehouse')
+        {% set stat_cards = [
+            ('Invoices This Month', stats.invoices_this_month|string, 'file-text', 'brand', 'Issued since the 1st'),
+            ('Outstanding Receivables', '₱' + '{:,.2f}'.format(stats.outstanding_receivables), 'hand-coins', 'accent', 'Invoices not yet Paid or Void'),
+            ('Outstanding Payables', '₱' + '{:,.2f}'.format(stats.outstanding_payables), 'wallet', 'brand', 'Verified, awaiting a check'),
+            ('Active Stock Items', stats.active_stock_items|string, 'boxes', 'accent', 'Tracked in the inventory master')
         ] %}
-        {% for label, value, icon, tone, caption in stats %}
+        {% for label, value, icon, tone, caption in stat_cards %}
         <div class="card p-5 transition hover:shadow-md">
             <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
@@ -61,10 +57,10 @@
             </div>
             <div class="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
                 {% set actions = [
-                    ('Purchase Request',      'clipboard-list', 'purchase_request'),
-                    ('Customers & Suppliers', 'contact',        'parameters_business_partners'),
-                    ('Warehouse Stocks',      'boxes',          'warehouse_stocks'),
-                    ('User Accounts',         'users',          'parameters_users')
+                    ('Invoices',         'file-text', 'invoice_invoices'),
+                    ('Collections',      'wallet',    'receivables_collections'),
+                    ('Purchase Orders',  'shopping-cart', 'purchase_order_orders'),
+                    ('Warehouse Stocks', 'boxes',     'warehouse_stocks')
                 ] %}
                 {% for label, icon, slug in actions %}
                 <a href="{{ url_for('main.page', slug=slug) }}"
@@ -84,31 +80,29 @@
             </div>
         </div>
 
-        <!-- Build status -->
+        <!-- Needs attention -->
         <div class="card">
             <div class="card-header">
                 <h2 class="card-title">
-                    <i data-lucide="activity" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
-                    Build Status
+                    <i data-lucide="bell-ring" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                    Needs Attention
                 </h2>
             </div>
-            <div class="space-y-3 p-5">
-                {% set modules = [
-                    ('User Accounts',         'Live',         'success'),
-                    ('Authentication',        'Live',         'success'),
-                    ('Customers & Suppliers', 'Prototype',    'warning'),
-                    ('Other modules',         'Design only',  'slate')
+            <div class="space-y-1 p-2">
+                {% set attention_items = [
+                    ('Purchase Orders pending approval', stats.pos_pending_approval, 'purchase_order_orders'),
+                    ('Fuel POs pending approval', stats.fuel_pos_pending_approval, 'purchase_order_fuel'),
+                    ('Payables awaiting verification', stats.payables_to_verify, 'payables_po'),
+                    ('Vouchers to check or approve', stats.vouchers_to_process, 'payables_vouchers')
                 ] %}
-                {% for name, state, tone in modules %}
-                <div class="flex items-center justify-between gap-3">
-                    <span class="min-w-0 truncate text-sm text-slate-600 dark:text-slate-300">{{ name }}</span>
-                    <span class="badge badge-{{ tone }} shrink-0">{{ state }}</span>
-                </div>
+                {% for label, count, slug in attention_items %}
+                <a href="{{ url_for('main.page', slug=slug) }}"
+                   class="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm transition
+                          hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <span class="min-w-0 truncate text-slate-600 dark:text-slate-300">{{ label }}</span>
+                    <span class="badge {{ 'badge-warning' if count else 'badge-slate' }} shrink-0">{{ count }}</span>
+                </a>
                 {% endfor %}
-
-                <p class="border-t border-slate-100 pt-3 text-xs leading-relaxed text-slate-400 dark:border-slate-800 dark:text-slate-500">
-                    Modules marked <em>Design only</em> show sample rows; edits there are not saved.
-                </p>
             </div>
         </div>
     </div>
