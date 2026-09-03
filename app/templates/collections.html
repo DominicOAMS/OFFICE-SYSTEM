@@ -1,0 +1,545 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+
+{% block title %}Collections - Office System{% endblock %}
+
+{% block content %}
+{% set STATUS_TONE = {
+    'Created': 'badge-success',
+    'Void': 'badge-accent'
+} %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="wallet" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Collections</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    Record an Official Receipt against one or more of a customer's Delivered invoices.
+                </p>
+            </div>
+        </div>
+        <button type="button" class="btn btn-primary" id="addNewBtn">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Record Collection
+        </button>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="wallet" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Collections
+            </h2>
+            <div class="flex items-center gap-2">
+                <form method="GET" action="{{ url_for('main.receivables_collections') }}" class="relative" id="searchForm">
+                    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" id="colSearch" value="{{ search }}"
+                           placeholder="Search OR #, customer, cheque #…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </form>
+                <span class="badge badge-slate whitespace-nowrap">{{ '{:,}'.format(total) }} shown</span>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+            {% for value, label in [('', 'All'), ('Created', 'Created'), ('Void', 'Void')] %}
+            <a href="{{ url_for('main.receivables_collections', q=search or None, status=value or None) }}"
+               class="badge {{ 'bg-accent-600 text-white ring-0' if status == value else 'badge-slate' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[56rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th w-24">OR #</th>
+                        <th class="table-th">Customer</th>
+                        <th class="table-th w-28">Date Collected</th>
+                        <th class="table-th w-28">Amount</th>
+                        <th class="table-th w-28">Net Amount</th>
+                        <th class="table-th w-28">Status</th>
+                        <th class="table-th w-24 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recordsBody">
+                    {% for c in collections %}
+                    <tr class="table-row"
+                        data-id="{{ c.id }}"
+                        data-or-number="{{ c.orNumber }}"
+                        data-customer-name="{{ c.customerName or '—' }}"
+                        data-date-collected="{{ c.dateCollected or '' }}"
+                        data-collected-by="{{ c.collectedBy or '' }}"
+                        data-remitted-to="{{ c.remittedTo or '' }}"
+                        data-cheque-number="{{ c.chequeNumber or '' }}"
+                        data-cheque-date="{{ c.chequeDate or '' }}"
+                        data-bank="{{ c.bank or '' }}"
+                        data-booklet-number="{{ c.bookletNumber or '' }}"
+                        data-series-number="{{ c.seriesNumber or '' }}"
+                        data-amount="{{ c.amount }}"
+                        data-wtax-rate="{{ c.wtaxRate }}"
+                        data-wtax-amount="{{ c.wtaxAmount }}"
+                        data-retention-amount="{{ c.retentionAmount }}"
+                        data-net-amount="{{ c.netAmount }}"
+                        data-bir-form-status="{{ c.birFormStatus or '' }}"
+                        data-notes="{{ c.notes or '' }}"
+                        data-status="{{ c.status }}"
+                        data-created-by-name="{{ c.createdByName or '' }}"
+                        data-void-reason="{{ c.voidReason or '' }}"
+                        {# single-quoted: Flask's tojson escapes < > & ' but not ",
+                           and JSON is full of " - see purchase_orders.html's data-items #}
+                        data-invoices='{{ invoices_by_collection.get(c.id, [])|tojson }}'>
+                        <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">{{ c.orNumber }}</td>
+                        <td class="table-td truncate">{{ c.customerName or '—' }}</td>
+                        <td class="table-td text-sm">{{ c.dateCollected or '—' }}</td>
+                        <td class="table-td text-sm">₱{{ '{:,.2f}'.format(c.amount) }}</td>
+                        <td class="table-td text-sm">₱{{ '{:,.2f}'.format(c.netAmount) }}</td>
+                        <td class="table-td">
+                            <span class="badge {{ STATUS_TONE.get(c.status, 'badge-slate') }}">{{ c.status }}</span>
+                        </td>
+                        <td class="table-td">
+                            <div class="flex items-center justify-end gap-1">
+                                <button type="button" class="btn btn-icon btn-ghost js-view" title="View" aria-label="View Collection">
+                                    <i data-lucide="eye" class="h-4 w-4"></i>
+                                </button>
+                                {% if c.createdBy == session.get('user_id') and c.status == 'Created' %}
+                                <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-void"
+                                        data-url="{{ url_for('main.collection_void', collection_id=c.id) }}" title="Void">
+                                    <i data-lucide="ban" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="wallet" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">No collections match your filters</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {{ render_pagination(
+            'main.receivables_collections', page, page_count, total, per_page,
+            {'q': search or None, 'status': status or None}
+        ) }}
+    </div>
+</div>
+
+<!-- ===================== Record Collection modal ===================== -->
+<div id="recordModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-2xl">
+        <form id="recordForm" method="POST" action="{{ url_for('main.collection_add') }}">
+            <div class="modal-header">
+                <h3 class="modal-title">Record Collection</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+
+            <div class="modal-body space-y-4">
+                <div class="relative" data-dropdown>
+                    <label class="label" for="customerSearchInput">Customer <span class="text-accent-600">*</span></label>
+                    <input type="text" class="input" id="customerSearchInput" placeholder="Search by customer ID or name…" autocomplete="off" required>
+                    <input type="hidden" id="fieldCustomerId" name="customerId">
+                    <div data-dropdown-panel id="customerOptions"
+                         class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label" for="fieldOrNumber">OR Number <span class="text-accent-600">*</span></label>
+                        <input type="number" class="input" id="fieldOrNumber" name="orNumber" min="1" step="1" required>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldDateCollected">Date Collected</label>
+                        <input type="date" class="input" id="fieldDateCollected" name="dateCollected">
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-200 pt-4 dark:border-slate-800">
+                    <label class="label">Invoices to Collect <span class="text-accent-600">*</span></label>
+                    <p class="help mb-3" id="invoicesHelp">Choose a customer above to see their Delivered, uncollected invoices.</p>
+
+                    <div id="invoicesPickerList" class="max-h-64 space-y-2 overflow-y-auto"></div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label class="label" for="fieldAmount">Amount (₱, VAT-inclusive) <span class="text-accent-600">*</span></label>
+                        <input type="number" class="input" id="fieldAmount" name="amount" min="0.01" step="0.01" required>
+                    </div>
+                    <div>
+                        <label class="label" for="fieldWtaxRate">WTax Rate (%)</label>
+                        <input type="number" class="input" id="fieldWtaxRate" name="wtaxRate" min="0" max="100" step="0.01" value="1">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldRetentionAmount">Retention (₱)</label>
+                        <input type="number" class="input" id="fieldRetentionAmount" name="retentionAmount" min="0" step="0.01" value="0">
+                    </div>
+                </div>
+
+                <div class="space-y-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/50">
+                    <div class="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+                        <span>WTax</span><span id="previewWtax">₱0.00</span>
+                    </div>
+                    <div class="flex items-center justify-between border-t border-slate-200 pt-1 text-sm font-semibold
+                                text-slate-900 dark:border-slate-700 dark:text-white">
+                        <span>Net Amount</span><span id="previewNet">₱0.00</span>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="label" for="fieldCollectedBy">Collected By</label>
+                        <input type="text" class="input" id="fieldCollectedBy" name="collectedBy">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldRemittedTo">Remitted To</label>
+                        <input type="text" class="input" id="fieldRemittedTo" name="remittedTo">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label class="label" for="fieldChequeNumber">Cheque Number</label>
+                        <input type="text" class="input" id="fieldChequeNumber" name="chequeNumber">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldChequeDate">Cheque Date</label>
+                        <input type="date" class="input" id="fieldChequeDate" name="chequeDate">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldBank">Bank</label>
+                        <input type="text" class="input" id="fieldBank" name="bank">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label class="label" for="fieldBookletNumber">Booklet #</label>
+                        <input type="text" class="input" id="fieldBookletNumber" name="bookletNumber">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldSeriesNumber">Series #</label>
+                        <input type="text" class="input" id="fieldSeriesNumber" name="seriesNumber">
+                    </div>
+                    <div>
+                        <label class="label" for="fieldBirFormStatus">BIR Form</label>
+                        <select class="input" id="fieldBirFormStatus" name="birFormStatus">
+                            <option value="">—</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                            <option value="To Follow">To Follow</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="label" for="fieldNotes">Notes</label>
+                    <textarea class="input" id="fieldNotes" name="notes" rows="2"></textarea>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-primary" id="collectionSubmitBtn" disabled>
+                    <i data-lucide="send" class="h-4 w-4"></i>Record Collection
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== View detail modal ===================== -->
+<div id="viewModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-lg">
+        <div class="modal-header">
+            <h3 class="modal-title">Collection Details</h3>
+            <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+        </div>
+        <div class="modal-body space-y-3 text-sm">
+            <div class="grid grid-cols-2 gap-3">
+                <div><p class="help mb-0.5">OR #</p><p id="viewOrNumber" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">Status</p><p id="viewStatus" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Customer</p><p id="viewCustomer" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Date Collected</p><p id="viewDateCollected" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Collected By</p><p id="viewCollectedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Remitted To</p><p id="viewRemittedTo" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Cheque</p><p id="viewCheque" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Booklet / Series</p><p id="viewBooklet" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">BIR Form</p><p id="viewBirForm" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Created By</p><p id="viewCreatedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+            </div>
+            <div>
+                <p class="help mb-1">Invoices Collected</p>
+                <div id="viewInvoices" class="space-y-2"></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
+                <div><p class="help mb-0.5">Amount</p><p id="viewAmount" class="font-medium text-slate-900 dark:text-white"></p></div>
+                <div><p class="help mb-0.5">WTax (<span id="viewWtaxRate"></span>)</p><p id="viewWtax" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Retention</p><p id="viewRetention" class="text-slate-700 dark:text-slate-300"></p></div>
+                <div><p class="help mb-0.5">Net Amount</p><p id="viewNet" class="font-semibold text-slate-900 dark:text-white"></p></div>
+            </div>
+            <div id="viewNotesWrap" class="hidden"><p class="help mb-0.5">Notes</p><p id="viewNotes" class="text-slate-700 dark:text-slate-300"></p></div>
+            <div id="viewVoidReasonWrap" class="hidden border-t border-slate-200 pt-3 dark:border-slate-800">
+                <p class="help mb-0.5">Void Reason</p><p id="viewVoidReason" class="text-slate-700 dark:text-slate-300"></p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Void action modal ===================== -->
+<div id="actionModal" data-modal class="modal-backdrop hidden">
+    <div class="modal-panel max-w-md">
+        <form id="actionForm" method="POST" action="">
+            <div class="modal-header">
+                <h3 class="modal-title">Void Collection</h3>
+                <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                </button>
+            </div>
+            <div class="modal-body space-y-3">
+                <p class="text-sm text-slate-600 dark:text-slate-300">
+                    This reverts every invoice this collection paid back to Delivered, freeing them to be
+                    collected again. This cannot be undone from here.
+                </p>
+                <div>
+                    <label class="label" for="actionReason">Reason</label>
+                    <textarea class="input" id="actionReason" name="reason" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
+                <button type="submit" class="btn btn-danger">
+                    <i data-lucide="ban" class="h-4 w-4"></i>Void
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var CUSTOMERS = {{ customers|tojson }};
+
+        var recordForm = document.getElementById('recordForm');
+        var tbody = document.getElementById('recordsBody');
+        var peso = OS.peso;
+        var escapeHtml = Pickers.escapeHtml;
+        var initSearchablePicker = Pickers.initSearchablePicker;
+
+        var customerPicker = initSearchablePicker(
+            'customerSearchInput', 'fieldCustomerId', 'customerOptions', CUSTOMERS,
+            function (c) { return c.id; }, function (c) { return c.name; },
+            function (c) { return (c.code || '') + ' — ' + c.name; }
+        );
+
+        /* ------------------------------------------------- invoices checklist picker
+           Not a catalog-style add-by-typing picker - this selects among EXISTING rows
+           (a customer's own Delivered, uncollected invoices), same shape as Check
+           Vouchers' payables checklist. */
+        var invoicesPickerList = document.getElementById('invoicesPickerList');
+        var invoicesHelp = document.getElementById('invoicesHelp');
+        var collectionSubmitBtn = document.getElementById('collectionSubmitBtn');
+
+        function renderInvoicesPicker(invoices) {
+            invoicesPickerList._invoices = invoices;
+            invoicesPickerList.innerHTML = invoices.length ? invoices.map(function (i) {
+                var label = i.invoiceNumber + (i.customerPo ? ' — PO ' + i.customerPo : '');
+                return '<label class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">'
+                    + '<span class="flex min-w-0 items-center gap-2">'
+                    + '<input type="checkbox" class="js-invoice-check shrink-0" name="invoiceIds" value="' + i.id + '">'
+                    + '<span class="truncate">' + escapeHtml(label) + '</span>'
+                    + '</span>'
+                    + '<span class="shrink-0 font-medium">' + peso(i.totalAmount) + '</span>'
+                    + '</label>';
+            }).join('') : '';
+        }
+
+        function recomputeSelectionSummary() {
+            var checked = Array.prototype.slice.call(invoicesPickerList.querySelectorAll('.js-invoice-check:checked'));
+            collectionSubmitBtn.disabled = checked.length === 0;
+            recomputePreview();
+        }
+
+        invoicesPickerList.addEventListener('change', function (e) {
+            if (e.target.classList.contains('js-invoice-check')) recomputeSelectionSummary();
+        });
+
+        document.getElementById('fieldCustomerId').addEventListener('change', function () {
+            var customerId = this.value;
+            if (!customerId) {
+                renderInvoicesPicker([]);
+                invoicesHelp.textContent = 'Choose a customer above to see their Delivered, uncollected invoices.';
+                recomputeSelectionSummary();
+                return;
+            }
+            invoicesHelp.textContent = 'Loading invoices…';
+            fetch('{{ url_for("main.collection_invoices_picker") }}?customerId=' + encodeURIComponent(customerId))
+                .then(function (r) { return r.json(); })
+                .then(function (invoices) {
+                    renderInvoicesPicker(invoices);
+                    invoicesHelp.textContent = invoices.length
+                        ? (invoices.length + ' invoice(s) available to select.')
+                        : 'This customer has no Delivered, uncollected invoices right now.';
+                    recomputeSelectionSummary();
+                })
+                .catch(function () {
+                    renderInvoicesPicker([]);
+                    invoicesHelp.textContent = 'Could not load invoices for this customer.';
+                    recomputeSelectionSummary();
+                });
+        });
+
+        /* ------------------------------------------------- live WTax/Net preview */
+        var fieldAmount = document.getElementById('fieldAmount');
+        var fieldWtaxRate = document.getElementById('fieldWtaxRate');
+        var fieldRetention = document.getElementById('fieldRetentionAmount');
+
+        function recomputePreview() {
+            var amount = parseFloat(fieldAmount.value);
+            var ratePct = parseFloat(fieldWtaxRate.value);
+            var retention = parseFloat(fieldRetention.value);
+            if (!isFinite(amount) || amount <= 0) amount = 0;
+            if (!isFinite(ratePct) || ratePct < 0) ratePct = 0;
+            if (!isFinite(retention) || retention < 0) retention = 0;
+            var vatable = amount / 1.12;
+            var wtax = vatable * (ratePct / 100);
+            var net = amount - wtax - retention;
+            document.getElementById('previewWtax').textContent = peso(wtax);
+            document.getElementById('previewNet').textContent = peso(net);
+        }
+        fieldAmount.addEventListener('input', recomputePreview);
+        fieldWtaxRate.addEventListener('input', recomputePreview);
+        fieldRetention.addEventListener('input', recomputePreview);
+
+        /* ------------------------------------------------------------- add */
+        document.getElementById('addNewBtn').addEventListener('click', function () {
+            recordForm.reset();
+            customerPicker.reset();
+            renderInvoicesPicker([]);
+            invoicesHelp.textContent = 'Choose a customer above to see their Delivered, uncollected invoices.';
+            fieldWtaxRate.value = '1';
+            document.getElementById('fieldRetentionAmount').value = '0';
+            document.getElementById('fieldDateCollected').value = OS.todayIso();
+            recomputeSelectionSummary();
+            OS.openModal('recordModal');
+        });
+
+        /* --------------------------------------------------------------- view */
+        function renderViewInvoices(row) {
+            var wrap = document.getElementById('viewInvoices');
+            var invoices = [];
+            try {
+                invoices = JSON.parse(row.getAttribute('data-invoices') || '[]');
+            } catch (err) {
+                invoices = [];
+            }
+            if (!invoices.length) {
+                wrap.innerHTML = '<p class="text-slate-500 dark:text-slate-400">No invoices linked (likely a migrated reference that no longer resolves).</p>';
+                return;
+            }
+            wrap.innerHTML = invoices.map(function (i, idx) {
+                return '<div class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">'
+                    + '<span class="truncate text-xs font-medium text-slate-900 dark:text-white">' + (idx + 1) + '. ' + escapeHtml(i.invoiceNumber) + '</span>'
+                    + '<span class="shrink-0 text-xs text-slate-500 dark:text-slate-400">' + peso(i.totalAmount) + '</span>'
+                    + '</div>';
+            }).join('');
+        }
+
+        function renderView(row) {
+            document.getElementById('viewOrNumber').textContent = row.getAttribute('data-or-number') || '—';
+            document.getElementById('viewStatus').textContent = row.getAttribute('data-status') || '—';
+            document.getElementById('viewCustomer').textContent = row.getAttribute('data-customer-name') || '—';
+            document.getElementById('viewDateCollected').textContent = row.getAttribute('data-date-collected') || '—';
+            document.getElementById('viewCollectedBy').textContent = row.getAttribute('data-collected-by') || '—';
+            document.getElementById('viewRemittedTo').textContent = row.getAttribute('data-remitted-to') || '—';
+            var chequeNumber = row.getAttribute('data-cheque-number');
+            var chequeDate = row.getAttribute('data-cheque-date');
+            var bank = row.getAttribute('data-bank');
+            document.getElementById('viewCheque').textContent = chequeNumber
+                ? (chequeNumber + (bank ? ' — ' + bank : '') + (chequeDate ? ' (' + chequeDate + ')' : ''))
+                : '—';
+            var booklet = row.getAttribute('data-booklet-number');
+            var series = row.getAttribute('data-series-number');
+            document.getElementById('viewBooklet').textContent = (booklet || '—') + ' / ' + (series || '—');
+            document.getElementById('viewBirForm').textContent = row.getAttribute('data-bir-form-status') || '—';
+            document.getElementById('viewCreatedBy').textContent = row.getAttribute('data-created-by-name') || '—';
+
+            renderViewInvoices(row);
+
+            document.getElementById('viewAmount').textContent = peso(row.getAttribute('data-amount'));
+            var wtaxRatePct = parseFloat(row.getAttribute('data-wtax-rate')) * 100;
+            document.getElementById('viewWtaxRate').textContent = (isFinite(wtaxRatePct) ? wtaxRatePct.toFixed(2) : '0') + '%';
+            document.getElementById('viewWtax').textContent = peso(row.getAttribute('data-wtax-amount'));
+            document.getElementById('viewRetention').textContent = peso(row.getAttribute('data-retention-amount'));
+            document.getElementById('viewNet').textContent = peso(row.getAttribute('data-net-amount'));
+
+            var notes = row.getAttribute('data-notes');
+            document.getElementById('viewNotesWrap').classList.toggle('hidden', !notes);
+            document.getElementById('viewNotes').textContent = notes || '';
+
+            var voidReason = row.getAttribute('data-void-reason');
+            document.getElementById('viewVoidReasonWrap').classList.toggle('hidden', !voidReason);
+            document.getElementById('viewVoidReason').textContent = voidReason || '';
+
+            OS.openModal('viewModal');
+        }
+
+        /* --------------------------------------------------------------- void */
+        var actionForm = document.getElementById('actionForm');
+
+        tbody.addEventListener('click', function (e) {
+            var viewBtn = e.target.closest('.js-view');
+            var voidBtn = e.target.closest('.js-void');
+            if (viewBtn) renderView(viewBtn.closest('tr'));
+            if (voidBtn) {
+                document.getElementById('actionReason').value = '';
+                actionForm.action = voidBtn.getAttribute('data-url');
+                OS.openModal('actionModal');
+            }
+        });
+
+        /* --------------------------------------------------------------- search */
+        var searchInput = document.getElementById('colSearch');
+        searchInput.addEventListener('search', function () {
+            if (searchInput.value === '') document.getElementById('searchForm').submit();
+        });
+
+        /* ------------------------------------------------- deep-link from Collectibles
+           Collectibles' "Collect" button links here with ?customerId=... - auto-open the
+           Add modal pre-scoped to that customer instead of making them pick again. */
+        var preselectCustomerId = new URLSearchParams(window.location.search).get('customerId');
+        if (preselectCustomerId) {
+            var preselected = CUSTOMERS.find(function (c) { return String(c.id) === String(preselectCustomerId); });
+            if (preselected) {
+                document.getElementById('addNewBtn').click();
+                customerPicker.setValue(preselected.id, preselected.name);
+            }
+        }
+    })();
+</script>
+{% endblock %}

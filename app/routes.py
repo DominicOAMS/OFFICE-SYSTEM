@@ -23,6 +23,7 @@ from werkzeug.security import check_password_hash
 
 from . import (
     check_vouchers_repo,
+    collections_repo,
     customers_repo,
     fuel_approvers_repo,
     fuel_po_repo,
@@ -2647,6 +2648,246 @@ def voucher_void(voucher_id):
     check_vouchers_repo.void(voucher_id, voided_by=session.get("user_id"), reason=reason)
     flash(f"Voucher {voucher['voucherNumber']} voided.", "success")
     return redirect(url_for("main.check_vouchers"))
+
+
+COLLECTIONS_PER_PAGE = 30
+COLLECTIBLES_PER_PAGE = 30
+
+
+def _invoice_for_picker(invoice):
+    """JSON-safe primitives for the Collection Add form's invoice picker AND a collection's
+    linked-invoices list (same shape feeds both)."""
+    return {
+        "id": invoice["id"],
+        "invoiceNumber": invoice["invoiceNumber"],
+        "invoiceDate": invoice["invoiceDate"].isoformat() if invoice["invoiceDate"] else None,
+        "customerPo": invoice["customerPo"],
+        "totalAmount": float(invoice["totalAmount"]) if invoice["totalAmount"] is not None else None,
+        "status": invoice["status"],
+    }
+
+
+def _parse_collection_form():
+    """Resolves the customer and snapshots customerCode/Name so a collection freezes what
+    it said, same reasoning as every other supplier/customer snapshot in this app. Money is
+    always derived from amount/wtaxRate/retentionAmount server-side, never trusted as a
+    typed total. orNumber is typed, not generated - it's a physical pre-printed OR booklet
+    number the collector already holds, not a software sequence."""
+    customer_id = request.form.get("customerId", "").strip()
+    customer = customers_repo.get_customer(int(customer_id)) if customer_id.isdigit() else None
+
+    or_number_raw = request.form.get("orNumber", "").strip()
+    or_number = int(or_number_raw) if or_number_raw.isdigit() else None
+
+    retention_raw = _parse_coordinate(request.form.get("retentionAmount", ""))
+    retention_amount = (
+        Decimal(str(retention_raw)).quantize(Decimal("0.01"))
+        if retention_raw is not None and retention_raw >= 0
+        else Decimal("0.00")
+    )
+
+    amount = _parse_coordinate(request.form.get("amount", ""))
+    wtax_rate_pct = _parse_coordinate(request.form.get("wtaxRate", ""))
+    if amount is not None and amount > 0 and wtax_rate_pct is not None and 0 <= wtax_rate_pct <= 100:
+        amount = Decimal(str(amount)).quantize(Decimal("0.01"))
+        wtax_rate = (Decimal(str(wtax_rate_pct)) / Decimal("100")).quantize(Decimal("0.0001"))
+        wtax_amount = ((amount / Decimal("1.12")) * wtax_rate).quantize(Decimal("0.01"))
+        net_amount = amount - wtax_amount - retention_amount
+    else:
+        amount = wtax_rate = wtax_amount = net_amount = None
+
+    invoice_ids = [int(x) for x in request.form.getlist("invoiceIds") if x.strip().isdigit()]
+
+    bir_form_status = request.form.get("birFormStatus", "").strip()
+    if bir_form_status not in ("Yes", "No", "To Follow"):
+        bir_form_status = None
+
+    return {
+        "orNumber": or_number,
+        "customerId": customer["id"] if customer else None,
+        "customerCode": customer["code"] if customer else None,
+        "customerName": customer["name"] if customer else None,
+        "dateCollected": request.form.get("dateCollected", "").strip() or None,
+        "collectedBy": _clip(request.form.get("collectedBy", "").strip(), limit=100) or None,
+        "remittedTo": _clip(request.form.get("remittedTo", "").strip(), limit=100) or None,
+        "chequeNumber": _clip(request.form.get("chequeNumber", "").strip(), limit=50) or None,
+        "chequeDate": request.form.get("chequeDate", "").strip() or None,
+        "bank": _clip(request.form.get("bank", "").strip(), limit=50) or None,
+        "bookletNumber": _clip(request.form.get("bookletNumber", "").strip(), limit=50) or None,
+        "seriesNumber": _clip(request.form.get("seriesNumber", "").strip(), limit=50) or None,
+        "amount": amount,
+        "wtaxRate": wtax_rate,
+        "wtaxAmount": wtax_amount,
+        "retentionAmount": retention_amount,
+        "netAmount": net_amount,
+        "birFormStatus": bir_form_status,
+        "notes": _clip(request.form.get("notes", "").strip()) or None,
+        "invoiceIds": invoice_ids,
+    }
+
+
+@main_bp.route("/page/receivables_collections")
+@login_required
+def receivables_collections():
+    search = request.args.get("q", "").strip()
+    status = request.args.get("status", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    total = collections_repo.count_collections(search or None, status or None)
+    page_count = max(1, -(-total // COLLECTIONS_PER_PAGE))  # ceil
+    page = min(page, page_count)
+
+    records = collections_repo.list_collections(
+        search=search or None,
+        status=status or None,
+        limit=COLLECTIONS_PER_PAGE,
+        offset=(page - 1) * COLLECTIONS_PER_PAGE,
+    )
+    collection_ids = [r["id"] for r in records]
+    invoices_by_collection = {
+        collection_id: [_invoice_for_picker(i) for i in invs]
+        for collection_id, invs in collections_repo.list_invoices_for_collections(collection_ids).items()
+    }
+    return render_template(
+        "collections.html",
+        collections=records,
+        invoices_by_collection=invoices_by_collection,
+        customers=customers_repo.list_active_customers(),
+        search=search,
+        status=status,
+        page=page,
+        page_count=page_count,
+        total=total,
+        per_page=COLLECTIONS_PER_PAGE,
+    )
+
+
+@main_bp.route("/page/receivables_collections/invoices")
+@login_required
+def collection_invoices_picker():
+    """Feeds the Collection Add form's picker: a customer's Delivered invoices not already
+    claimed by a non-Void collection."""
+    customer_id = request.args.get("customerId", "").strip()
+    if not customer_id.isdigit():
+        return jsonify([])
+    invoices = collections_repo.list_uncollected_delivered_invoices_for_customer(int(customer_id))
+    return jsonify([_invoice_for_picker(i) for i in invoices])
+
+
+@main_bp.route("/page/receivables_collections/add", methods=["POST"])
+@login_required
+def collection_add():
+    data = _parse_collection_form()
+    if not data["customerId"] or not data["invoiceIds"] or data["orNumber"] is None or data["amount"] is None:
+        flash("Choose a customer, an OR number, an amount, and at least one invoice to collect against.", "error")
+        return redirect(url_for("main.receivables_collections"))
+    try:
+        collections_repo.create_collection(data, created_by=session.get("user_id"))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("main.receivables_collections"))
+    except (IntegrityError, DataError):
+        flash("Could not save — that OR number may already be used, or a value was too long to save.", "error")
+        return redirect(url_for("main.receivables_collections"))
+    flash(f"Collection OR #{data['orNumber']} recorded.", "success")
+    return redirect(url_for("main.receivables_collections"))
+
+
+@main_bp.route("/page/receivables_collections/<int:collection_id>/void", methods=["POST"])
+@login_required
+def collection_void(collection_id):
+    collection = collections_repo.get_collection(collection_id)
+    if not collection:
+        abort(404)
+    if collection["createdBy"] != session.get("user_id") or collection["status"] == "Void":
+        abort(403)
+    reason = request.form.get("reason", "").strip()[:255] or None
+    collections_repo.void(collection_id, voided_by=session.get("user_id"), reason=reason)
+    flash(f"Collection OR #{collection['orNumber']} voided.", "success")
+    return redirect(url_for("main.receivables_collections"))
+
+
+@main_bp.route("/page/receivables_collectibles")
+@login_required
+def receivables_collectibles():
+    """Read-only filtered view of Invoices - everything not yet Paid or Void. Nothing is
+    'created' here, so there's no add route, just a link into Collections' own Add flow."""
+    search = request.args.get("q", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    total = invoices_repo.count_invoices(search or None, None, None, outstanding_only=True)
+    page_count = max(1, -(-total // COLLECTIBLES_PER_PAGE))  # ceil
+    page = min(page, page_count)
+
+    records = invoices_repo.list_invoices(
+        search=search or None,
+        status=None,
+        branch=None,
+        limit=COLLECTIBLES_PER_PAGE,
+        offset=(page - 1) * COLLECTIBLES_PER_PAGE,
+        outstanding_only=True,
+    )
+    return render_template(
+        "collectibles.html",
+        invoices=records,
+        search=search,
+        page=page,
+        page_count=page_count,
+        total=total,
+        per_page=COLLECTIBLES_PER_PAGE,
+    )
+
+
+@main_bp.route("/page/receivables_soa")
+@login_required
+def receivables_soa():
+    """A customer-scoped combined ledger (invoices = charges, collections = payments),
+    merged and running-balanced in Python - same approach warehouse_stocks() already
+    established for a computed report, since one customer's history is always small enough
+    that server pagination would be overkill."""
+    customer_id_raw = request.args.get("customerId", "").strip()
+    customer = customers_repo.get_customer(int(customer_id_raw)) if customer_id_raw.isdigit() else None
+
+    entries = []
+    if customer:
+        for inv in invoices_repo.list_invoices_for_customer(customer["id"]):
+            if inv["status"] == "Void":
+                continue
+            entries.append({
+                "date": inv["invoiceDate"],
+                "type": "Invoice",
+                "reference": inv["invoiceNumber"],
+                "charge": inv["totalAmount"] or Decimal("0.00"),
+                "payment": Decimal("0.00"),
+            })
+        for col in collections_repo.list_collections_for_customer(customer["id"]):
+            if col["status"] == "Void":
+                continue
+            entries.append({
+                "date": col["dateCollected"],
+                "type": "Collection",
+                "reference": f"OR #{col['orNumber']}",
+                "charge": Decimal("0.00"),
+                "payment": col["amount"] or Decimal("0.00"),
+            })
+        entries.sort(key=lambda e: e["date"] or date.min)
+        running = Decimal("0.00")
+        for entry in entries:
+            running += entry["charge"] - entry["payment"]
+            entry["balance"] = running
+
+    return render_template(
+        "soa.html",
+        customers=customers_repo.list_active_customers(),
+        customer=customer,
+        entries=entries,
+    )
 
 
 @main_bp.route("/page/<slug>")

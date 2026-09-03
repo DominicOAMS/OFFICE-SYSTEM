@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
+
+{% block title %}Collectibles - Office System{% endblock %}
+
+{% block content %}
+{% set STATUS_TONE = {
+    'Created': 'badge-slate',
+    'Printed': 'badge-brand',
+    'Delivered': 'badge-warning'
+} %}
+<div class="px-4 py-6 sm:px-6">
+
+    <!-- Page header -->
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div class="flex items-start gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600
+                         dark:bg-brand-500/10 dark:text-brand-400">
+                <i data-lucide="hand-coins" class="h-5 w-5"></i>
+            </span>
+            <div>
+                <h1 class="text-xl font-semibold tracking-tight text-slate-900 dark:text-white">Collectibles</h1>
+                <p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                    Invoices still owed to us - not yet Paid or Void. A read-only view; record a
+                    payment from <a href="{{ url_for('main.receivables_collections') }}" class="text-brand-600 hover:underline dark:text-brand-400">Collections</a>.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card overflow-hidden">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i data-lucide="hand-coins" class="h-[18px] w-[18px] text-brand-600 dark:text-brand-400"></i>
+                Outstanding Invoices
+            </h2>
+            <div class="flex items-center gap-2">
+                <form method="GET" action="{{ url_for('main.receivables_collectibles') }}" class="relative" id="searchForm">
+                    <i data-lucide="search"
+                       class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" id="collectiblesSearch" value="{{ search }}"
+                           placeholder="Search invoice #, customer…"
+                           class="input w-64 py-1.5 pl-9 text-sm">
+                </form>
+                <span class="badge badge-slate whitespace-nowrap">{{ '{:,}'.format(total) }} shown</span>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[56rem] table-fixed">
+                <thead class="bg-slate-50 dark:bg-slate-800/50">
+                    <tr>
+                        <th class="table-th w-28">Invoice #</th>
+                        <th class="table-th w-24">Date</th>
+                        <th class="table-th">Sold To</th>
+                        <th class="table-th w-28">Status</th>
+                        <th class="table-th w-32 text-right">Total</th>
+                        <th class="table-th w-40 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for inv in invoices %}
+                    <tr class="table-row">
+                        <td class="table-td font-mono text-xs text-slate-500 dark:text-slate-400">{{ inv.invoiceNumber }}</td>
+                        <td class="table-td text-sm">{{ inv.invoiceDate or '—' }}</td>
+                        <td class="table-td truncate">{{ inv.soldTo or '—' }}</td>
+                        <td class="table-td">
+                            <span class="badge {{ STATUS_TONE.get(inv.status, 'badge-slate') }}">{{ inv.status }}</span>
+                        </td>
+                        <td class="table-td text-right text-sm">
+                            {% if inv.totalAmount %}₱{{ '{:,.2f}'.format(inv.totalAmount) }}{% else %}—{% endif %}
+                        </td>
+                        <td class="table-td text-right">
+                            {% if inv.status == 'Delivered' and inv.customerId %}
+                            <a href="{{ url_for('main.receivables_collections', customerId=inv.customerId) }}" class="btn btn-secondary btn-sm">
+                                <i data-lucide="wallet" class="h-3.5 w-3.5"></i>Collect
+                            </a>
+                            {% else %}
+                            <span class="text-xs text-slate-400">Not yet Delivered</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="px-5 py-14 text-center">
+                            <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+                                <i data-lucide="hand-coins" class="h-6 w-6"></i>
+                            </span>
+                            <p class="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">Nothing outstanding matches your search</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {{ render_pagination(
+            'main.receivables_collectibles', page, page_count, total, per_page,
+            {'q': search or None}
+        ) }}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var searchInput = document.getElementById('collectiblesSearch');
+        searchInput.addEventListener('search', function () {
+            if (searchInput.value === '') document.getElementById('searchForm').submit();
+        });
+    })();
+</script>
+{% endblock %}

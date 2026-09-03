@@ -35,12 +35,16 @@ _INV_FROM = """
 """
 
 
-def _filter_clauses(search, status, branch):
+def _filter_clauses(search, status, branch, outstanding_only=False):
     sql = " WHERE i.isDeleted = 0"
     params = []
     if status:
         sql += " AND i.status = %s"
         params.append(status)
+    if outstanding_only:
+        # Feeds the Collectibles report - "still owed to us", i.e. everything short of
+        # already Paid or a dead Void row. Coarser than a single status filter on purpose.
+        sql += " AND i.status NOT IN ('Paid', 'Void')"
     if branch:
         sql += " AND i.branch = %s"
         params.append(branch)
@@ -60,29 +64,46 @@ def _filter_clauses(search, status, branch):
     return sql, params
 
 
-def count_invoices(search=None, status=None, branch=None):
+def count_invoices(search=None, status=None, branch=None, outstanding_only=False):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             sql = "SELECT COUNT(*) AS n" + _INV_FROM
-            extra_sql, params = _filter_clauses(search, status, branch)
+            extra_sql, params = _filter_clauses(search, status, branch, outstanding_only)
             cur.execute(sql + extra_sql, params)
             return cur.fetchone()["n"]
     finally:
         conn.close()
 
 
-def list_invoices(search=None, status=None, branch=None, limit=None, offset=0):
+def list_invoices(search=None, status=None, branch=None, limit=None, offset=0, outstanding_only=False):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             sql = "SELECT " + _INV_COLUMNS + _INV_FROM
-            extra_sql, params = _filter_clauses(search, status, branch)
+            extra_sql, params = _filter_clauses(search, status, branch, outstanding_only)
             sql += extra_sql + " ORDER BY i.id DESC"
             if limit is not None:
                 sql += " LIMIT %s OFFSET %s"
                 params = params + [int(limit), int(offset)]
             cur.execute(sql, params)
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def list_invoices_for_customer(customer_id):
+    """Every non-deleted invoice for one customer, unpaginated - feeds the Statement of
+    Account report, where one customer's full history is always a small, boundable list
+    (unlike the main Invoices page, which needs real pagination over 8,000+ rows)."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT " + _INV_COLUMNS + _INV_FROM
+                + " WHERE i.isDeleted = 0 AND i.customerId = %s ORDER BY i.invoiceDate ASC, i.id ASC",
+                (customer_id,),
+            )
             return cur.fetchall()
     finally:
         conn.close()
