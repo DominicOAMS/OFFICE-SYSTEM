@@ -230,7 +230,8 @@
                     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
                             <label class="label" for="fieldDeliveryTerm">Delivery Term</label>
-                            <input type="text" class="input" id="fieldDeliveryTerm" name="deliveryTerm">
+                            <input type="number" class="input" id="fieldDeliveryTerm" name="deliveryTerm" min="0" step="1" placeholder="0">
+                            <p class="help">Number is day(s).</p>
                         </div>
                         <div>
                             <label class="label" for="fieldPaymentTerm">Payment Term</label>
@@ -249,7 +250,8 @@
                         </div>
                         <div>
                             <label class="label" for="fieldDeliveryDate">Expected Delivery Date</label>
-                            <input type="date" class="input" id="fieldDeliveryDate" name="deliveryDate">
+                            <input type="date" class="input bg-slate-100 dark:bg-slate-800" id="fieldDeliveryDate" name="deliveryDate" readonly>
+                            <p class="help">Auto-computed from PO Date + Delivery Term.</p>
                         </div>
                         <div class="sm:col-span-2">
                             <label class="label" for="fieldPaymentDueDate">Payment Due Date</label>
@@ -686,8 +688,27 @@
             document.getElementById('deliveryMobileDisplay').textContent = defaults.mobile || '—';
         }
 
-        /* ------------------------------------------------- payment due date (requirement 2)
-           Expected Delivery Date + the chosen Payment Term's day count. */
+        /* ------------------------------------------------- delivery/payment due dates
+           Matches legacy's own chain (purchase_order.blade.php's setDelivery() /
+           autoFillDate()): PO Date + Delivery Term (days) -> Expected Delivery Date,
+           which then feeds Expected Delivery Date + Payment Term -> Payment Due Date.
+           Both target fields are read-only here since they're now fully computed. */
+
+        function recomputeDeliveryDate() {
+            var poDateVal = document.getElementById('fieldPoDate').value;
+            var deliveryField = document.getElementById('fieldDeliveryDate');
+            if (!poDateVal) {
+                deliveryField.value = '';
+                recomputePaymentDueDate();
+                return;
+            }
+            var days = parseInt(document.getElementById('fieldDeliveryTerm').value, 10);
+            if (!isFinite(days) || days < 0) days = 0;
+            var d = new Date(poDateVal + 'T00:00:00');
+            d.setDate(d.getDate() + days);
+            deliveryField.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+            recomputePaymentDueDate();
+        }
 
         function recomputePaymentDueDate() {
             var deliveryVal = document.getElementById('fieldDeliveryDate').value;
@@ -703,8 +724,9 @@
             dueField.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
         }
 
-        document.getElementById('fieldDeliveryDate').addEventListener('input', recomputePaymentDueDate);
-        document.getElementById('fieldDeliveryDate').addEventListener('change', recomputePaymentDueDate);
+        document.getElementById('fieldPoDate').addEventListener('input', recomputeDeliveryDate);
+        document.getElementById('fieldPoDate').addEventListener('change', recomputeDeliveryDate);
+        document.getElementById('fieldDeliveryTerm').addEventListener('input', recomputeDeliveryDate);
         document.getElementById('fieldPaymentTerm').addEventListener('change', recomputePaymentDueDate);
 
         /* ------------------------------------------------- attachment preview */
@@ -1164,6 +1186,7 @@
             setupBranchField();
             applyBranchDeliveryDefaults();
             document.getElementById('fieldPoDate').value = todayIso();
+            recomputeDeliveryDate();
             OS.openModal('recordModal');
         });
 
