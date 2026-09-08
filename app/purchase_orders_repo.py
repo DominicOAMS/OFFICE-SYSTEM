@@ -8,10 +8,15 @@ _PO_COLUMNS = """
     appr.name AS approverName
 """
 
+# approverUserId is no longer collected on creation (any configured PO Approver
+# can act on any pending PO now, not one pre-assigned at creation time) - so
+# "who approved/rejected this" is only knowable after the fact, via whoever's
+# id approve()/reject() wrote into updatedBy. The status guard keeps a delete
+# (which also touches updatedBy) from being misread as an approval action.
 _PO_FROM = """
     FROM tbl_purchase_orders po
     LEFT JOIN tbl_users creator ON creator.id = po.createdBy
-    LEFT JOIN tbl_users appr ON appr.id = po.approverUserId
+    LEFT JOIN tbl_users appr ON appr.id = po.updatedBy AND po.status IN ('Approved', 'Rejected')
 """
 
 

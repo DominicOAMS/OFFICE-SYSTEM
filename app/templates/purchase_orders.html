@@ -117,16 +117,13 @@
                         </td>
                         <td class="table-td">
                             <span class="badge {{ STATUS_TONE.get(po.status, 'badge-slate') }}">{{ po.status }}</span>
-                            {% if po.status == 'Pending Approval' and po.approverName %}
-                            <p class="mt-1 truncate text-[11px] text-slate-400">Approver: {{ po.approverName }}</p>
-                            {% endif %}
                         </td>
                         <td class="table-td">
                             <div class="flex items-center justify-end gap-1">
                                 <button type="button" class="btn btn-icon btn-ghost js-view" title="View" aria-label="View Purchase Order">
                                     <i data-lucide="eye" class="h-4 w-4"></i>
                                 </button>
-                                {% if session.get('user_id') == po.approverUserId and po.status == 'Pending Approval' %}
+                                {% if is_po_approver and po.status == 'Pending Approval' %}
                                 <button type="button" class="btn btn-icon text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 js-approve"
                                         data-url="{{ url_for('main.purchase_order_approve', po_id=po.id) }}" title="Approve">
                                     <i data-lucide="check" class="h-4 w-4"></i>
@@ -169,7 +166,7 @@
 <!-- ===================== Add Purchase Order modal ===================== -->
 <div id="recordModal" data-modal class="modal-backdrop hidden">
     <div class="modal-panel max-w-6xl">
-        <form id="recordForm" method="POST" action="{{ url_for('main.purchase_order_add') }}" enctype="multipart/form-data">
+        <form id="recordForm" method="POST" action="{{ url_for('main.purchase_order_add') }}">
             <div class="modal-header">
                 <h3 class="modal-title">Add Purchase Order</h3>
                 <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
@@ -305,24 +302,6 @@
                 <div>
                     <label class="label" for="fieldNotes">Notes</label>
                     <textarea class="input" id="fieldNotes" name="notes" rows="2"></textarea>
-                </div>
-
-                <div>
-                    <label class="label" for="fieldAttachment">Supporting Document (optional)</label>
-                    <input type="file" class="input" id="fieldAttachment" name="attachment" accept="image/*,.pdf">
-                    <div id="attachmentPreviewWrap" class="hidden mt-3">
-                        <img id="attachmentPreview" class="h-24 w-24 rounded-lg border border-slate-200 object-cover dark:border-slate-700" alt="Attachment preview">
-                    </div>
-                </div>
-
-                <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
-                    <label class="label" for="approverSearchInput">Approver <span class="text-accent-600">*</span></label>
-                    <div class="relative" data-dropdown>
-                        <input type="text" class="input" id="approverSearchInput" placeholder="Type an approver's name…" autocomplete="off" required>
-                        <input type="hidden" id="fieldApproverUserId" name="approverUserId">
-                        <div data-dropdown-panel id="approverOptions"
-                             class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
-                    </div>
                 </div>
             </div>
 
@@ -516,7 +495,6 @@
 <script>
     (function () {
         var SUPPLIERS = {{ suppliers|tojson }};
-        var APPROVERS = {{ approvers|tojson }};
         var CUSTOMERS = {{ customers|tojson }};
         var SUPPLIER_PRICE_CODES = {{ supplier_price_codes|tojson }};
         var USER_BRANCH = {{ (session.get('user_branch') or '')|tojson }};
@@ -563,10 +541,6 @@
             'supplierSearchInput', 'fieldSupplierId', 'supplierOptions', SUPPLIERS,
             function (s) { return s.id; }, function (s) { return s.name; },
             function (s) { return (s.code || '') + ' — ' + s.name; }
-        );
-        var approverPicker = initSearchablePicker(
-            'approverSearchInput', 'fieldApproverUserId', 'approverOptions', APPROVERS,
-            function (a) { return a.userId; }, function (a) { return a.name; }
         );
 
         /* ------------------------------------------------- supplier details card
@@ -769,21 +743,6 @@
         document.getElementById('fieldDeliveryDate').addEventListener('input', recomputeTermFromDeliveryDate);
         document.getElementById('fieldDeliveryDate').addEventListener('change', recomputeTermFromDeliveryDate);
         document.getElementById('fieldPaymentTerm').addEventListener('change', recomputePaymentDueDate);
-
-        /* ------------------------------------------------- attachment preview */
-        var attachmentInput = document.getElementById('fieldAttachment');
-        var attachmentPreviewWrap = document.getElementById('attachmentPreviewWrap');
-        var attachmentPreview = document.getElementById('attachmentPreview');
-
-        attachmentInput.addEventListener('change', function () {
-            var file = attachmentInput.files[0];
-            if (file && file.type.indexOf('image/') === 0) {
-                attachmentPreview.src = URL.createObjectURL(file);
-                attachmentPreviewWrap.classList.remove('hidden');
-            } else {
-                attachmentPreviewWrap.classList.add('hidden');
-            }
-        });
 
         var escapeHtml = Pickers.escapeHtml;
 
@@ -1230,12 +1189,10 @@
         /* ------------------------------------------------------------- add */
         document.getElementById('addNewBtn').addEventListener('click', function () {
             recordForm.reset();
-            attachmentPreviewWrap.classList.add('hidden');
             // supplierPicker.reset() cascades (via the fieldSupplierId 'change' it
             // dispatches) into clearing the price code select and line items too -
             // see the fieldSupplierId listener and refreshSupplierProducts() above.
             supplierPicker.reset();
-            approverPicker.reset();
             setupBranchField();
             applyBranchDeliveryDefaults();
             document.getElementById('fieldPoDate').value = todayIso();

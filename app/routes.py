@@ -1238,7 +1238,7 @@ def purchase_orders():
         suppliers=suppliers_repo.list_active_suppliers(),
         supplier_price_codes=suppliers_repo.list_price_codes_by_supplier(),
         customers=customers_repo.list_active_customers(),
-        approvers=purchase_order_approvers_repo.list_approvers(),
+        is_po_approver=purchase_order_approvers_repo.is_approver(session.get("user_id")),
         search=search,
         status=status,
         page=page,
@@ -1365,7 +1365,6 @@ def _parse_items(raw_json, valid_catalogs=None):
 
 def _parse_purchase_order_form():
     supplier_id = request.form.get("supplierId", "").strip()
-    approver_user_id = request.form.get("approverUserId", "").strip()
     price_code = _clip(request.form.get("priceCode", "").strip()) or None
 
     supplier = suppliers_repo.get_supplier(int(supplier_id)) if supplier_id.isdigit() else None
@@ -1416,7 +1415,10 @@ def _parse_purchase_order_form():
         "priceCode": price_code,
         "notes": _clip(request.form.get("notes", "").strip()) or None,
         "branch": _clip(request.form.get("branch", "").strip(), limit=100) or None,
-        "approverUserId": int(approver_user_id) if approver_user_id.isdigit() else None,
+        # No longer collected on the form - any configured PO Approver can act on
+        # any pending PO now, rather than one specific person pre-assigned here.
+        "approverUserId": None,
+        "attachmentPath": None,
         "items": items,
         "allocationErrors": allocation_errors,
     }
@@ -1426,8 +1428,8 @@ def _parse_purchase_order_form():
 @login_required
 def purchase_order_add():
     data = _parse_purchase_order_form()
-    if not data["supplierId"] or not data["approverUserId"]:
-        flash("Supplier and Approver are required.", "error")
+    if not data["supplierId"]:
+        flash("Supplier is required.", "error")
         return redirect(url_for("main.purchase_orders"))
     # _parse_items guarantees every surviving item has a description, a positive quantity
     # and a unit cost, so a non-empty list always rolls up to a non-None total - no
@@ -1440,12 +1442,6 @@ def purchase_order_add():
         return redirect(url_for("main.purchase_orders"))
     if data["allocationErrors"]:
         flash(" ".join(data["allocationErrors"]), "error")
-        return redirect(url_for("main.purchase_orders"))
-
-    try:
-        data["attachmentPath"] = _save_attachment(request.files.get("attachment"))
-    except ValueError as e:
-        flash(str(e), "error")
         return redirect(url_for("main.purchase_orders"))
 
     try:
@@ -1481,7 +1477,7 @@ def purchase_order_approve(po_id):
     po = purchase_orders_repo.get_purchase_order(po_id)
     if not po:
         abort(404)
-    if po["status"] != "Pending Approval" or po["approverUserId"] != session.get("user_id"):
+    if po["status"] != "Pending Approval" or not purchase_order_approvers_repo.is_approver(session.get("user_id")):
         abort(403)
     purchase_orders_repo.approve(
         po_id, approved_by=session.get("user_id"), remarks=request.form.get("remarks", "").strip() or None
@@ -1496,7 +1492,7 @@ def purchase_order_reject(po_id):
     po = purchase_orders_repo.get_purchase_order(po_id)
     if not po:
         abort(404)
-    if po["status"] != "Pending Approval" or po["approverUserId"] != session.get("user_id"):
+    if po["status"] != "Pending Approval" or not purchase_order_approvers_repo.is_approver(session.get("user_id")):
         abort(403)
     purchase_orders_repo.reject(
         po_id, rejected_by=session.get("user_id"), remarks=request.form.get("remarks", "").strip() or None
