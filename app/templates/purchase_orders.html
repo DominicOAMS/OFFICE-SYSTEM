@@ -201,15 +201,6 @@
                             </div>
                             <p class="text-sm"><span class="text-slate-500 dark:text-slate-400">Address:</span> <span id="supplierDetailAddress" class="text-slate-700 dark:text-slate-300">—</span></p>
                         </div>
-
-                        <div class="relative" data-dropdown>
-                            <label class="label" for="fieldPriceCode">Price Code</label>
-                            <input type="text" class="input" id="fieldPriceCode" name="priceCode" autocomplete="off"
-                                   placeholder="Pick an existing code or type a new one…">
-                            <div data-dropdown-panel id="priceCodeOptions"
-                                 class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
-                            <p class="help">Type a new code if this supplier has never quoted under it before.</p>
-                        </div>
                     </div>
 
                     <div class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
@@ -232,38 +223,49 @@
                         <input type="hidden" id="fieldDeliveryAddress" name="deliveryAddress">
                         <input type="hidden" id="fieldDeliveryTelephone" name="deliveryTelephone">
                         <input type="hidden" id="fieldDeliveryMobileNumber" name="deliveryMobileNumber">
+                    </div>
+                </div>
 
-                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                            <div>
-                                <label class="label" for="fieldDeliveryTerm">Delivery Term</label>
-                                <input type="number" class="input" id="fieldDeliveryTerm" name="deliveryTerm" min="0" step="1" placeholder="0">
-                                <p class="help">Number is day(s).</p>
-                            </div>
-                            <div>
-                                <label class="label" for="fieldPaymentTerm">Payment Term</label>
-                                <select class="input" id="fieldPaymentTerm" name="paymentTerm">
-                                    <option>15 days</option>
-                                    <option>30 days</option>
-                                    <option selected>45 days</option>
-                                    <option>60 days</option>
-                                    <option>90 days</option>
-                                    <option>C.O.D</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="label" for="fieldPoDate">PO Date</label>
-                                <input type="date" class="input" id="fieldPoDate" name="orderDate">
-                            </div>
-                            <div>
-                                <label class="label" for="fieldDeliveryDate">Expected Delivery Date</label>
-                                <input type="date" class="input" id="fieldDeliveryDate" name="deliveryDate">
-                                <p class="help">Sets Delivery Term, or is set by it — either one drives the other.</p>
-                            </div>
-                            <div class="sm:col-span-2">
-                                <label class="label" for="fieldPaymentDueDate">Payment Due Date</label>
-                                <input type="date" class="input bg-slate-100 dark:bg-slate-800" id="fieldPaymentDueDate" name="paymentDueDate" readonly>
-                                <p class="help">Auto-computed from Expected Delivery Date + Payment Term.</p>
-                            </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                    <p class="mb-4 text-sm font-medium text-slate-700 dark:text-slate-300">Order Terms</p>
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <div class="relative" data-dropdown>
+                            <label class="label" for="fieldPriceCode">Price Code</label>
+                            <input type="text" class="input" id="fieldPriceCode" name="priceCode" autocomplete="off"
+                                   placeholder="Pick an existing code or type a new one…">
+                            <div data-dropdown-panel id="priceCodeOptions"
+                                 class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                            <p class="help">Type a new code if this supplier has never quoted under it before.</p>
+                        </div>
+                        <div>
+                            <label class="label" for="fieldDeliveryTerm">Delivery Term</label>
+                            <input type="number" class="input" id="fieldDeliveryTerm" name="deliveryTerm" min="0" step="1" placeholder="0">
+                            <p class="help">Number is day(s).</p>
+                        </div>
+                        <div>
+                            <label class="label" for="fieldPaymentTerm">Payment Term</label>
+                            <select class="input" id="fieldPaymentTerm" name="paymentTerm">
+                                <option>15 days</option>
+                                <option>30 days</option>
+                                <option selected>45 days</option>
+                                <option>60 days</option>
+                                <option>90 days</option>
+                                <option>C.O.D</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="label" for="fieldPoDate">PO Date</label>
+                            <input type="date" class="input" id="fieldPoDate" name="orderDate">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldDeliveryDate">Expected Delivery Date</label>
+                            <input type="date" class="input" id="fieldDeliveryDate" name="deliveryDate">
+                            <p class="help">Sets Delivery Term, or is set by it — either one drives the other.</p>
+                        </div>
+                        <div>
+                            <label class="label" for="fieldPaymentDueDate">Payment Due Date</label>
+                            <input type="date" class="input bg-slate-100 dark:bg-slate-800" id="fieldPaymentDueDate" name="paymentDueDate" readonly>
+                            <p class="help">Auto-computed from Expected Delivery Date + Payment Term.</p>
                         </div>
                     </div>
                 </div>
