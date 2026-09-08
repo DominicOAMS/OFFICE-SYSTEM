@@ -168,7 +168,7 @@
 
 <!-- ===================== Add Purchase Order modal ===================== -->
 <div id="recordModal" data-modal class="modal-backdrop hidden">
-    <div class="modal-panel max-w-3xl">
+    <div class="modal-panel max-w-6xl">
         <form id="recordForm" method="POST" action="{{ url_for('main.purchase_order_add') }}" enctype="multipart/form-data">
             <div class="modal-header">
                 <h3 class="modal-title">Add Purchase Order</h3>
@@ -179,84 +179,91 @@
 
             <div class="modal-body space-y-5">
 
-                <div class="relative" data-dropdown>
-                    <label class="label" for="supplierSearchInput">Supplier <span class="text-accent-600">*</span></label>
-                    <input type="text" class="input" id="supplierSearchInput" placeholder="Search by supplier ID or name…" autocomplete="off" required>
-                    <input type="hidden" id="fieldSupplierId" name="supplierId">
-                    <div data-dropdown-panel id="supplierOptions"
-                         class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
-                </div>
+                <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                    <div class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                        <p class="text-sm font-medium text-slate-700 dark:text-slate-300">Supplier</p>
 
-                <div id="supplierDetails" class="hidden space-y-1.5 rounded-xl border border-slate-200
-                            bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50">
-                    <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
-                        <p><span class="text-slate-500 dark:text-slate-400">ID:</span> <span id="supplierDetailCode" class="font-mono text-slate-900 dark:text-white">—</span></p>
-                        <p><span class="text-slate-500 dark:text-slate-400">Tel:</span> <span id="supplierDetailTelephone" class="text-slate-700 dark:text-slate-300">—</span></p>
-                        <p><span class="text-slate-500 dark:text-slate-400">Fax:</span> <span id="supplierDetailFax" class="text-slate-700 dark:text-slate-300">—</span></p>
-                        <p><span class="text-slate-500 dark:text-slate-400">Email:</span> <span id="supplierDetailEmail" class="text-slate-700 dark:text-slate-300">—</span></p>
+                        <div class="relative" data-dropdown>
+                            <label class="label" for="supplierSearchInput">Supplier <span class="text-accent-600">*</span></label>
+                            <input type="text" class="input" id="supplierSearchInput" placeholder="Search by supplier ID or name…" autocomplete="off" required>
+                            <input type="hidden" id="fieldSupplierId" name="supplierId">
+                            <div data-dropdown-panel id="supplierOptions"
+                                 class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                        </div>
+
+                        <div id="supplierDetails" class="hidden space-y-1.5 rounded-lg border border-slate-200
+                                    bg-white p-3 dark:border-slate-700 dark:bg-slate-900/40">
+                            <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                                <p><span class="text-slate-500 dark:text-slate-400">ID:</span> <span id="supplierDetailCode" class="font-mono text-slate-900 dark:text-white">—</span></p>
+                                <p><span class="text-slate-500 dark:text-slate-400">Tel:</span> <span id="supplierDetailTelephone" class="text-slate-700 dark:text-slate-300">—</span></p>
+                                <p><span class="text-slate-500 dark:text-slate-400">Fax:</span> <span id="supplierDetailFax" class="text-slate-700 dark:text-slate-300">—</span></p>
+                                <p><span class="text-slate-500 dark:text-slate-400">Email:</span> <span id="supplierDetailEmail" class="text-slate-700 dark:text-slate-300">—</span></p>
+                            </div>
+                            <p class="text-sm"><span class="text-slate-500 dark:text-slate-400">Address:</span> <span id="supplierDetailAddress" class="text-slate-700 dark:text-slate-300">—</span></p>
+                        </div>
+
+                        <div class="relative" data-dropdown>
+                            <label class="label" for="fieldPriceCode">Price Code</label>
+                            <input type="text" class="input" id="fieldPriceCode" name="priceCode" autocomplete="off"
+                                   placeholder="Pick an existing code or type a new one…">
+                            <div data-dropdown-panel id="priceCodeOptions"
+                                 class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                            <p class="help">Type a new code if this supplier has never quoted under it before.</p>
+                        </div>
                     </div>
-                    <p class="text-sm"><span class="text-slate-500 dark:text-slate-400">Address:</span> <span id="supplierDetailAddress" class="text-slate-700 dark:text-slate-300">—</span></p>
-                </div>
 
-                <div class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
-                    <p class="text-sm font-medium text-slate-700 dark:text-slate-300">Delivery Information</p>
+                    <div class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
+                        <p class="text-sm font-medium text-slate-700 dark:text-slate-300">Delivery Information</p>
 
-                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
                             <label class="label" for="fieldBranch">Branch</label>
                             <select class="input" id="fieldBranch"></select>
                             <input type="hidden" id="fieldBranchValue" name="branch">
                         </div>
-                        <div>
-                            <label class="label" for="fieldPriceCode">Price Code</label>
-                            <select class="input" id="fieldPriceCode" name="priceCode">
-                                <option value="">Select a supplier first</option>
-                            </select>
-                        </div>
-                    </div>
 
-                    <div class="space-y-1 rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
-                        <p><span class="text-slate-500 dark:text-slate-400">Address:</span> <span id="deliveryAddressDisplay" class="text-slate-700 dark:text-slate-300">—</span></p>
-                        <div class="grid grid-cols-2 gap-x-4">
-                            <p><span class="text-slate-500 dark:text-slate-400">Telephone:</span> <span id="deliveryTelephoneDisplay" class="text-slate-700 dark:text-slate-300">—</span></p>
-                            <p><span class="text-slate-500 dark:text-slate-400">Mobile:</span> <span id="deliveryMobileDisplay" class="text-slate-700 dark:text-slate-300">—</span></p>
+                        <div class="space-y-1 rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
+                            <p><span class="text-slate-500 dark:text-slate-400">Address:</span> <span id="deliveryAddressDisplay" class="text-slate-700 dark:text-slate-300">—</span></p>
+                            <div class="grid grid-cols-2 gap-x-4">
+                                <p><span class="text-slate-500 dark:text-slate-400">Telephone:</span> <span id="deliveryTelephoneDisplay" class="text-slate-700 dark:text-slate-300">—</span></p>
+                                <p><span class="text-slate-500 dark:text-slate-400">Mobile:</span> <span id="deliveryMobileDisplay" class="text-slate-700 dark:text-slate-300">—</span></p>
+                            </div>
+                            <p class="help">Fixed default for your branch.</p>
                         </div>
-                        <p class="help">Fixed default for your branch.</p>
-                    </div>
-                    <input type="hidden" id="fieldDeliveryAddress" name="deliveryAddress">
-                    <input type="hidden" id="fieldDeliveryTelephone" name="deliveryTelephone">
-                    <input type="hidden" id="fieldDeliveryMobileNumber" name="deliveryMobileNumber">
+                        <input type="hidden" id="fieldDeliveryAddress" name="deliveryAddress">
+                        <input type="hidden" id="fieldDeliveryTelephone" name="deliveryTelephone">
+                        <input type="hidden" id="fieldDeliveryMobileNumber" name="deliveryMobileNumber">
 
-                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        <div>
-                            <label class="label" for="fieldDeliveryTerm">Delivery Term</label>
-                            <input type="number" class="input" id="fieldDeliveryTerm" name="deliveryTerm" min="0" step="1" placeholder="0">
-                            <p class="help">Number is day(s).</p>
-                        </div>
-                        <div>
-                            <label class="label" for="fieldPaymentTerm">Payment Term</label>
-                            <select class="input" id="fieldPaymentTerm" name="paymentTerm">
-                                <option>15 days</option>
-                                <option>30 days</option>
-                                <option selected>45 days</option>
-                                <option>60 days</option>
-                                <option>90 days</option>
-                                <option>C.O.D</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="label" for="fieldPoDate">PO Date</label>
-                            <input type="date" class="input" id="fieldPoDate" name="orderDate">
-                        </div>
-                        <div>
-                            <label class="label" for="fieldDeliveryDate">Expected Delivery Date</label>
-                            <input type="date" class="input bg-slate-100 dark:bg-slate-800" id="fieldDeliveryDate" name="deliveryDate" readonly>
-                            <p class="help">Auto-computed from PO Date + Delivery Term.</p>
-                        </div>
-                        <div class="sm:col-span-2">
-                            <label class="label" for="fieldPaymentDueDate">Payment Due Date</label>
-                            <input type="date" class="input bg-slate-100 dark:bg-slate-800" id="fieldPaymentDueDate" name="paymentDueDate" readonly>
-                            <p class="help">Auto-computed from Expected Delivery Date + Payment Term.</p>
+                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <div>
+                                <label class="label" for="fieldDeliveryTerm">Delivery Term</label>
+                                <input type="number" class="input" id="fieldDeliveryTerm" name="deliveryTerm" min="0" step="1" placeholder="0">
+                                <p class="help">Number is day(s).</p>
+                            </div>
+                            <div>
+                                <label class="label" for="fieldPaymentTerm">Payment Term</label>
+                                <select class="input" id="fieldPaymentTerm" name="paymentTerm">
+                                    <option>15 days</option>
+                                    <option>30 days</option>
+                                    <option selected>45 days</option>
+                                    <option>60 days</option>
+                                    <option>90 days</option>
+                                    <option>C.O.D</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="label" for="fieldPoDate">PO Date</label>
+                                <input type="date" class="input" id="fieldPoDate" name="orderDate">
+                            </div>
+                            <div>
+                                <label class="label" for="fieldDeliveryDate">Expected Delivery Date</label>
+                                <input type="date" class="input" id="fieldDeliveryDate" name="deliveryDate">
+                                <p class="help">Sets Delivery Term, or is set by it — either one drives the other.</p>
+                            </div>
+                            <div class="sm:col-span-2">
+                                <label class="label" for="fieldPaymentDueDate">Payment Due Date</label>
+                                <input type="date" class="input bg-slate-100 dark:bg-slate-800" id="fieldPaymentDueDate" name="paymentDueDate" readonly>
+                                <p class="help">Auto-computed from Expected Delivery Date + Payment Term.</p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -332,52 +339,49 @@
    template.content is a detached fragment so lucide.createIcons() doesn't scan
    it prematurely. No ids inside - rows are keyed by data-item uid. #}
 <template id="itemRowTemplate">
-    <div class="js-item-row rounded-xl border border-slate-200 p-4 dark:border-slate-700" data-item="">
-        <div class="mb-3 flex items-center justify-between gap-2">
-            <span class="js-item-number grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-50
+    <div class="js-item-row rounded-xl border border-slate-200 p-3 dark:border-slate-700" data-item="">
+        <div class="flex flex-wrap items-end gap-2 lg:flex-nowrap">
+            <span class="js-item-number grid h-6 w-6 shrink-0 place-items-center self-center rounded-full bg-brand-50
                          text-xs font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"></span>
-            <button type="button" class="js-remove-item btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+
+            <div class="relative min-w-[14rem] flex-1" data-dropdown>
+                <label class="label">Catalog / Description <span class="text-accent-600">*</span></label>
+                <input type="text" class="js-item-catalog-search input" autocomplete="off" placeholder="Search this supplier's priced products…">
+                <div class="js-item-catalog-panel hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg
+                            border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+            </div>
+
+            <div class="w-28 shrink-0">
+                <label class="label">Unit</label>
+                <select class="js-item-unit input bg-slate-100 dark:bg-slate-800" disabled></select>
+            </div>
+            <div class="w-24 shrink-0">
+                <label class="label">Qty <span class="text-accent-600">*</span></label>
+                <input type="number" class="js-item-quantity input" min="0.01" step="0.01">
+            </div>
+            <div class="w-32 shrink-0">
+                <label class="label">Unit Cost (₱)</label>
+                <input type="number" class="js-item-unit-cost input cursor-not-allowed bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400" readonly tabindex="-1">
+            </div>
+            <div class="w-32 shrink-0">
+                <label class="label">Amount</label>
+                <input type="text" class="js-item-amount input cursor-not-allowed bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400" readonly tabindex="-1">
+            </div>
+            <button type="button" class="js-remove-item btn btn-icon shrink-0 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
                     data-action="remove-item" aria-label="Remove this line item">
                 <i data-lucide="trash-2" class="h-4 w-4"></i>
             </button>
         </div>
 
-        <div class="relative" data-dropdown>
-            <label class="label">Catalog / Description <span class="text-accent-600">*</span></label>
-            <input type="text" class="js-item-catalog-search input" autocomplete="off" placeholder="Search this supplier's priced products…">
-            <div class="js-item-catalog-panel hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg
-                        border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
-        </div>
-
-        <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div class="col-span-2 sm:col-span-1">
-                <label class="label">Unit</label>
-                <input type="text" class="js-item-unit input">
-            </div>
-            <div>
-                <label class="label">Quantity <span class="text-accent-600">*</span></label>
-                <input type="number" class="js-item-quantity input" min="0.01" step="0.01">
-            </div>
-            <div>
-                <label class="label">Unit Cost (₱) <span class="text-accent-600">*</span></label>
-                <input type="number" class="js-item-unit-cost input" min="0" step="0.01">
-            </div>
-            <div>
-                <label class="label">Amount</label>
-                <input type="text" class="js-item-amount input cursor-not-allowed bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400" readonly tabindex="-1">
-            </div>
-        </div>
-
-        <div class="mt-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
-            <div class="mb-2 flex items-center justify-between gap-2">
+        <div class="mt-2 rounded-lg border border-slate-200 p-2.5 dark:border-slate-700">
+            <div class="flex items-center justify-between gap-2">
                 <label class="label mb-0">Allocate to customers (optional)</label>
                 <span class="js-item-allocated-summary shrink-0 text-xs text-slate-500 dark:text-slate-400">0 / 0 allocated</span>
             </div>
-            <div class="js-item-allocations space-y-2"></div>
+            <div class="js-item-allocations mt-2 space-y-2"></div>
             <button type="button" class="js-add-allocation btn btn-secondary btn-sm mt-2" data-action="add-allocation">
                 <i data-lucide="plus" class="h-3.5 w-3.5"></i>Add allocation
             </button>
-            <p class="help mt-1">Split this line's quantity across the customer(s) it's being ordered for, so the PO can be traced back to them later.</p>
         </div>
     </div>
 </template>
@@ -593,39 +597,57 @@
            selected automatically since there's nothing else to choose. */
 
         var fieldPriceCode = document.getElementById('fieldPriceCode');
+        var priceCodePanel = document.getElementById('priceCodeOptions');
+        Pickers.registerPanel(priceCodePanel);
 
-        function populatePriceCodeOptions(supplierId) {
-            fieldPriceCode.innerHTML = '';
-            var placeholder = document.createElement('option');
-            placeholder.value = '';
-
-            if (!supplierId) {
-                placeholder.textContent = 'Select a supplier first';
-                fieldPriceCode.appendChild(placeholder);
-                fieldPriceCode.disabled = true;
-                return;
-            }
+        // Requirement 4: a combobox, not a closed list - typing a code that isn't
+        // in the supplier's existing list is allowed (a brand new price code for
+        // this supplier), the panel just offers their existing ones as suggestions.
+        function renderPriceCodeOptions(filterText) {
+            var supplierId = document.getElementById('fieldSupplierId').value;
             var codes = SUPPLIER_PRICE_CODES[supplierId] || [];
-            if (!codes.length) {
-                placeholder.textContent = 'No price codes on file for this supplier';
-                fieldPriceCode.appendChild(placeholder);
-                fieldPriceCode.disabled = true;
-                return;
-            }
-            fieldPriceCode.disabled = false;
-            codes.forEach(function (code) {
-                var opt = document.createElement('option');
-                opt.value = code;
-                opt.textContent = code;
-                fieldPriceCode.appendChild(opt);
-            });
-            fieldPriceCode.value = codes[0];
+            var term = (filterText || '').trim().toLowerCase();
+            var matches = codes.filter(function (c) { return !term || c.toLowerCase().indexOf(term) !== -1; });
+            priceCodePanel.innerHTML = matches.length
+                ? matches.map(function (c) {
+                    return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50">' + escapeHtml(c) + '</button>';
+                }).join('')
+                : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">'
+                    + (supplierId ? 'No existing price codes for this supplier — type to create a new one' : 'Select a supplier first')
+                    + '</p>';
+        }
+
+        priceCodePanel.addEventListener('click', function (e) {
+            var btn = e.target.closest('button');
+            if (!btn) return;
+            fieldPriceCode.value = btn.textContent;
+            priceCodePanel.classList.add('hidden');
+            fieldPriceCode.dispatchEvent(new Event('change'));
+        });
+
+        fieldPriceCode.addEventListener('input', function () {
+            renderPriceCodeOptions(fieldPriceCode.value);
+            priceCodePanel.classList.remove('hidden');
+        });
+
+        fieldPriceCode.addEventListener('click', function (e) {
+            e.stopPropagation();
+            closeAllOtherDropdowns(priceCodePanel);
+            renderPriceCodeOptions(fieldPriceCode.value);
+            priceCodePanel.classList.remove('hidden');
+        });
+
+        // A single existing code is filled in for convenience (nothing else to
+        // choose); several or none are left blank for the user to pick or type.
+        function defaultPriceCodeForSupplier(supplierId) {
+            var codes = supplierId ? (SUPPLIER_PRICE_CODES[supplierId] || []) : [];
+            fieldPriceCode.value = codes.length === 1 ? codes[0] : '';
         }
 
         document.getElementById('fieldSupplierId').addEventListener('change', function () {
             var supplier = this.value ? findSupplierById(this.value) : null;
             showSupplierDetails(supplier);
-            populatePriceCodeOptions(this.value || null);
+            defaultPriceCodeForSupplier(this.value || null);
             fieldPriceCode.dispatchEvent(new Event('change'));
         });
 
@@ -690,11 +712,16 @@
 
         /* ------------------------------------------------- delivery/payment due dates
            Matches legacy's own chain (purchase_order.blade.php's setDelivery() /
-           autoFillDate()): PO Date + Delivery Term (days) -> Expected Delivery Date,
+           autoFillDate()): PO Date + Delivery Term (days) <-> Expected Delivery Date,
            which then feeds Expected Delivery Date + Payment Term -> Payment Due Date.
-           Both target fields are read-only here since they're now fully computed. */
+           Delivery Term and Expected Delivery Date are both editable and keep each
+           other in sync - typing either one recomputes the other from PO Date. */
 
-        function recomputeDeliveryDate() {
+        function isoDate(d) {
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+
+        function recomputeDeliveryDateFromTerm() {
             var poDateVal = document.getElementById('fieldPoDate').value;
             var deliveryField = document.getElementById('fieldDeliveryDate');
             if (!poDateVal) {
@@ -706,7 +733,17 @@
             if (!isFinite(days) || days < 0) days = 0;
             var d = new Date(poDateVal + 'T00:00:00');
             d.setDate(d.getDate() + days);
-            deliveryField.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+            deliveryField.value = isoDate(d);
+            recomputePaymentDueDate();
+        }
+
+        function recomputeTermFromDeliveryDate() {
+            var poDateVal = document.getElementById('fieldPoDate').value;
+            var deliveryVal = document.getElementById('fieldDeliveryDate').value;
+            if (poDateVal && deliveryVal) {
+                var diffDays = Math.round((new Date(deliveryVal + 'T00:00:00') - new Date(poDateVal + 'T00:00:00')) / 86400000);
+                document.getElementById('fieldDeliveryTerm').value = diffDays > 0 ? diffDays : 0;
+            }
             recomputePaymentDueDate();
         }
 
@@ -721,12 +758,14 @@
             var days = PAYMENT_TERM_DAYS.hasOwnProperty(term) ? PAYMENT_TERM_DAYS[term] : 0;
             var d = new Date(deliveryVal + 'T00:00:00');
             d.setDate(d.getDate() + days);
-            dueField.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+            dueField.value = isoDate(d);
         }
 
-        document.getElementById('fieldPoDate').addEventListener('input', recomputeDeliveryDate);
-        document.getElementById('fieldPoDate').addEventListener('change', recomputeDeliveryDate);
-        document.getElementById('fieldDeliveryTerm').addEventListener('input', recomputeDeliveryDate);
+        document.getElementById('fieldPoDate').addEventListener('input', recomputeDeliveryDateFromTerm);
+        document.getElementById('fieldPoDate').addEventListener('change', recomputeDeliveryDateFromTerm);
+        document.getElementById('fieldDeliveryTerm').addEventListener('input', recomputeDeliveryDateFromTerm);
+        document.getElementById('fieldDeliveryDate').addEventListener('input', recomputeTermFromDeliveryDate);
+        document.getElementById('fieldDeliveryDate').addEventListener('change', recomputeTermFromDeliveryDate);
         document.getElementById('fieldPaymentTerm').addEventListener('change', recomputePaymentDueDate);
 
         /* ------------------------------------------------- attachment preview */
@@ -936,7 +975,20 @@
                 item.description = p.description || '';
                 item.unit = p.unit || '';
                 input.value = label(p);
-                row.querySelector('.js-item-unit').value = item.unit;
+
+                // Requirement 8: locked to this priced product's own on-file unit -
+                // a supplier price row only ever has the one unit it was quoted in,
+                // same "assigned unit only" rule legacy applies, so there's nothing
+                // else to offer here.
+                var unitField = row.querySelector('.js-item-unit');
+                unitField.innerHTML = '';
+                if (item.unit) {
+                    var opt = document.createElement('option');
+                    opt.value = item.unit;
+                    opt.textContent = item.unit;
+                    unitField.appendChild(opt);
+                }
+
                 if (p.price != null) {
                     item.unitCost = p.price;
                     row.querySelector('.js-item-unit-cost').value = p.price;
@@ -953,11 +1005,16 @@
             });
 
             input.addEventListener('input', function () {
-                // Not a pick from the panel - clear the link rather than letting a
-                // previous selection's values sit there looking like they belong to
+                // Not a pick from the panel - clear the link (including the locked
+                // unit/unit cost from whatever was previously picked) rather than
+                // letting stale values sit there looking like they belong to
                 // whatever's now typed. The row stays incomplete until a real pick.
                 item.catalogCode = '';
                 item.description = '';
+                item.unit = '';
+                item.unitCost = '';
+                row.querySelector('.js-item-unit').innerHTML = '';
+                row.querySelector('.js-item-unit-cost').value = '';
                 render(input.value);
                 panel.classList.remove('hidden');
                 syncItems();
@@ -1112,15 +1169,9 @@
             var item = itemByUid(row.getAttribute('data-item'));
             if (!item) return;
 
-            if (e.target.classList.contains('js-item-unit')) {
-                item.unit = e.target.value;
-                syncItems();
-            } else if (e.target.classList.contains('js-item-quantity')) {
+            if (e.target.classList.contains('js-item-quantity')) {
                 item.quantity = e.target.value;
                 updateAllocationSummary(item);
-                syncItems();
-            } else if (e.target.classList.contains('js-item-unit-cost')) {
-                item.unitCost = e.target.value;
                 syncItems();
             } else if (e.target.classList.contains('js-alloc-quantity')) {
                 var allocRow = e.target.closest('.js-allocation-row');
@@ -1186,7 +1237,7 @@
             setupBranchField();
             applyBranchDeliveryDefaults();
             document.getElementById('fieldPoDate').value = todayIso();
-            recomputeDeliveryDate();
+            recomputeDeliveryDateFromTerm();
             OS.openModal('recordModal');
         });
 
