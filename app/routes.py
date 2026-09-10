@@ -34,6 +34,7 @@ from . import (
     gatepasses_repo,
     inventory_items_repo,
     invoices_repo,
+    notifications_repo,
     payables_repo,
     program_menu_repo,
     purchase_order_approvers_repo,
@@ -1445,7 +1446,7 @@ def purchase_order_add():
         return redirect(url_for("main.purchase_orders"))
 
     try:
-        _, po_number = purchase_orders_repo.create_purchase_order(data, created_by=session.get("user_id"))
+        po_id, po_number = purchase_orders_repo.create_purchase_order(data, created_by=session.get("user_id"))
     except (IntegrityError, DataError):
         flash(
             "Could not submit — one of the selected records no longer exists, or a "
@@ -1454,7 +1455,64 @@ def purchase_order_add():
         )
         return redirect(url_for("main.purchase_orders"))
 
+    highlight_url = url_for("main.purchase_orders") + f"?highlight={po_id}"
+    for approver in purchase_order_approvers_repo.list_approvers():
+        notifications_repo.create_notification(
+            approver["userId"],
+            "PO awaiting approval",
+            f"PO {po_number} needs your approval.",
+            highlight_url,
+        )
+
     flash(f"Purchase Order {po_number} submitted for approval.", "success")
+    return redirect(url_for("main.purchase_orders"))
+
+
+@main_bp.route("/page/purchase_order_orders/next-number")
+@login_required
+def purchase_order_next_number():
+    """A display-only preview for the Add form's header - see
+    purchase_orders_repo.preview_next_po_number for why this isn't a reservation."""
+    return jsonify({"poNumber": purchase_orders_repo.preview_next_po_number(date.today().year)})
+
+
+@main_bp.route("/page/purchase_order_orders/<int:po_id>/edit", methods=["POST"])
+@login_required
+def purchase_order_edit(po_id):
+    po = purchase_orders_repo.get_purchase_order(po_id)
+    if not po:
+        abort(404)
+    # Server-side gate (legacy only ever enforced this client-side) - once a PO has moved
+    # past Pending Approval it represents a decision already acted on, not a draft. Same
+    # creator-only restriction as Delete - only the requester can revise their own PO.
+    if po["status"] != "Pending Approval" or po["createdBy"] != session.get("user_id"):
+        abort(403)
+
+    data = _parse_purchase_order_form()
+    if not data["supplierId"]:
+        flash("Supplier is required.", "error")
+        return redirect(url_for("main.purchase_orders"))
+    if not data["items"]:
+        flash(
+            "Add at least one line item — every item needs a description, quantity, and unit cost.",
+            "error",
+        )
+        return redirect(url_for("main.purchase_orders"))
+    if data["allocationErrors"]:
+        flash(" ".join(data["allocationErrors"]), "error")
+        return redirect(url_for("main.purchase_orders"))
+
+    try:
+        purchase_orders_repo.update_purchase_order(po_id, data, updated_by=session.get("user_id"))
+    except (IntegrityError, DataError):
+        flash(
+            "Could not save — one of the selected records no longer exists, or a "
+            "value was too long to save.",
+            "error",
+        )
+        return redirect(url_for("main.purchase_orders"))
+
+    flash(f"Purchase Order {po['poNumber']} updated.", "success")
     return redirect(url_for("main.purchase_orders"))
 
 
@@ -1482,6 +1540,13 @@ def purchase_order_approve(po_id):
     purchase_orders_repo.approve(
         po_id, approved_by=session.get("user_id"), remarks=request.form.get("remarks", "").strip() or None
     )
+    if po["createdBy"]:
+        notifications_repo.create_notification(
+            po["createdBy"],
+            "PO Approved",
+            f"PO {po['poNumber']} was approved.",
+            url_for("main.purchase_orders") + f"?highlight={po_id}",
+        )
     flash("Purchase Order approved.", "success")
     return redirect(url_for("main.purchase_orders"))
 
@@ -1497,7 +1562,62 @@ def purchase_order_reject(po_id):
     purchase_orders_repo.reject(
         po_id, rejected_by=session.get("user_id"), remarks=request.form.get("remarks", "").strip() or None
     )
+    if po["createdBy"]:
+        notifications_repo.create_notification(
+            po["createdBy"],
+            "PO Rejected",
+            f"PO {po['poNumber']} was rejected.",
+            url_for("main.purchase_orders") + f"?highlight={po_id}",
+        )
     flash("Purchase Order rejected.", "success")
+    return redirect(url_for("main.purchase_orders"))
+
+
+@main_bp.route("/page/purchase_order_orders/<int:po_id>/print", methods=["POST"])
+@login_required
+def purchase_order_print(po_id):
+    po = purchase_orders_repo.get_purchase_order(po_id)
+    if not po:
+        abort(404)
+    if po["status"] != "Approved":
+        abort(403)
+    purchase_orders_repo.set_status(po_id, "Printed", updated_by=session.get("user_id"))
+    flash(f"Purchase Order {po['poNumber']} marked Printed.", "success")
+    return redirect(url_for("main.purchase_orders"))
+
+
+@main_bp.route("/page/purchase_order_orders/<int:po_id>/print-view")
+@login_required
+def purchase_order_print_view(po_id):
+    """The printable PO document - same layout as the legacy Calamba/Bicol printouts
+    (purchase_printout.blade.php / purchase_printout_bicol.blade.php), branch-conditional
+    on po['branch'] the same way those two separate legacy views were chosen by branch.
+    Unlike legacy (which stuffed the PO into localStorage and re-read it with client JS),
+    this is plain server-rendered HTML from the PO's own current data - reprintable at any
+    status, with no side effect of its own; marking the PO 'Printed' is the separate
+    purchase_order_print action above."""
+    po = purchase_orders_repo.get_purchase_order(po_id)
+    if not po:
+        abort(404)
+    items = purchase_orders_repo.get_items_for_purchase_order(po_id)
+    return render_template(
+        "purchase_order_print.html",
+        po=po,
+        items=items,
+        branch="Bicol" if po["branch"] == "Bicol" else "Calamba",
+    )
+
+
+@main_bp.route("/page/purchase_order_orders/<int:po_id>/verify-delivery", methods=["POST"])
+@login_required
+def purchase_order_verify_delivery(po_id):
+    po = purchase_orders_repo.get_purchase_order(po_id)
+    if not po:
+        abort(404)
+    if po["status"] != "For Verification":
+        abort(403)
+    new_status = purchase_orders_repo.verify_delivery(po_id, verified_by=session.get("user_id"))
+    flash(f"Purchase Order {po['poNumber']} marked {new_status}.", "success")
     return redirect(url_for("main.purchase_orders"))
 
 
@@ -1541,6 +1661,35 @@ def purchase_order_approvers_remove(approver_id):
     return redirect(url_for("main.purchase_order_approvers"))
 
 
+@main_bp.route("/page/notifications")
+@login_required
+def notifications_list():
+    user_id = session.get("user_id")
+    return jsonify(
+        {
+            "notifications": [
+                {
+                    "id": n["id"],
+                    "title": n["title"],
+                    "body": n["body"],
+                    "url": n["url"],
+                    "isRead": bool(n["isRead"]),
+                    "createdAt": n["createdAt"].isoformat() if n["createdAt"] else None,
+                }
+                for n in notifications_repo.list_for_user(user_id)
+            ],
+            "unreadCount": notifications_repo.count_unread(user_id),
+        }
+    )
+
+
+@main_bp.route("/page/notifications/<int:notification_id>/read", methods=["POST"])
+@login_required
+def notification_read(notification_id):
+    notifications_repo.mark_read(notification_id, user_id=session.get("user_id"))
+    return jsonify({"ok": True})
+
+
 WAREHOUSE_TXN_PER_PAGE = 30
 MAX_TXN_ITEMS = 50
 
@@ -1553,6 +1702,7 @@ def _txn_item_for_view(item):
     which requires that exact format; the View modal formats it for display in JS instead."""
     return {
         "itemId": item["itemId"],
+        "purchaseOrderItemId": item["purchaseOrderItemId"],
         "catalogCode": item["catalogCode"],
         "description": item["description"],
         "unit": item["unit"],
@@ -1594,8 +1744,21 @@ def warehouse_transactions():
         "warehouse_transactions.html",
         transactions=records,
         items_by_txn=items_by_txn,
-        approved_purchase_orders=purchase_orders_repo.list_purchase_orders(status="Approved"),
+        # Eligible to receive AGAINST (Stock In via PO): any PO that's been printed and
+        # hasn't finished the receiving/verification cycle yet - not just 'Printed', since a
+        # partially-received PO sits in 'For Verification' or 'Partially Delivered' while it
+        # still has outstanding lines to receive.
+        receivable_purchase_orders=purchase_orders_repo.list_purchase_orders(
+            status=("Printed", "For Verification", "Partially Delivered")
+        ),
+        # Eligible to REFERENCE (Return to Supplier's optional "which PO was this from"
+        # field): anything far enough along to have actually been received at some point.
+        reference_purchase_orders=purchase_orders_repo.list_purchase_orders(
+            status=("Printed", "For Verification", "Partially Delivered", "Delivered", "Paid")
+        ),
         inventory_items=purchase_orders_repo.list_active_inventory_items(),
+        stock_balances=warehouse_transactions_repo.list_stock_balances(),
+        all_branches=users_repo.list_distinct_branches(),
         last_supplier_invoice_by_supplier=warehouse_transactions_repo.list_last_supplier_invoice_by_supplier(),
         search=search,
         direction=direction,
@@ -1607,7 +1770,38 @@ def warehouse_transactions():
     )
 
 
-def _parse_transaction_items(raw_json):
+@main_bp.route("/page/warehouse_transactions/po-items")
+@login_required
+def warehouse_transaction_po_items():
+    """Feeds the Stock-In form's "Load Outstanding Items from PO" button: the picked PO's
+    own line items, quantity reduced by whatever's already been served, so receiving
+    against them can increment quantityServed by exactly what's still owed. A line already
+    fully served (outstandingQuantity <= 0) is dropped - there's nothing left to receive."""
+    po_id_raw = request.args.get("purchaseOrderId", "").strip()
+    if not po_id_raw.isdigit():
+        return jsonify([])
+    items = purchase_orders_repo.get_items_for_purchase_order(int(po_id_raw))
+    result = []
+    for item in items:
+        outstanding = (item["quantity"] or 0) - (item["quantityServed"] or 0)
+        if outstanding <= 0:
+            continue
+        result.append(
+            {
+                "purchaseOrderItemId": item["id"],
+                "itemId": item["itemId"],
+                "catalogCode": item["catalogCode"],
+                "description": item["description"],
+                "unit": item["unit"],
+                "orderedQuantity": float(item["quantity"] or 0),
+                "alreadyServedQuantity": float(item["quantityServed"] or 0),
+                "outstandingQuantity": float(outstanding),
+            }
+        )
+    return jsonify(result)
+
+
+def _parse_transaction_items(raw_json, valid_po_item_ids=None, direction="IN"):
     """The repeatable line-items payload from the Add form. A line is DROPPED (not
     patched) when missing a description or a positive quantity - same "drop, don't patch"
     rule _parse_items uses. No cost fields here at all - this module records physical
@@ -1642,7 +1836,15 @@ def _parse_transaction_items(raw_json):
         if not description or raw_quantity is None or raw_quantity <= 0:
             continue
 
-        unit_mode = "pack" if entry.get("unitMode") == "pack" else "base"
+        po_item_id_raw = str(entry.get("purchaseOrderItemId", "")).strip()
+        po_item_id = int(po_item_id_raw) if po_item_id_raw.isdigit() else None
+        if valid_po_item_ids is not None and po_item_id not in valid_po_item_ids:
+            po_item_id = None
+
+        # Stock Out always depletes an existing on-hand lot, which list_stock_balances()
+        # already tracks in base units - there's nothing to convert a box count INTO, so
+        # pack mode is IN-only regardless of what the client sends.
+        unit_mode = "pack" if direction == "IN" and entry.get("unitMode") == "pack" else "base"
         pack_size = pack_sizes.get(item_id) if item_id is not None else None
         if unit_mode == "pack":
             if not pack_size or pack_size <= 0:
@@ -1658,6 +1860,7 @@ def _parse_transaction_items(raw_json):
         items.append(
             {
                 "itemId": item_id,
+                "purchaseOrderItemId": po_item_id,
                 "catalogCode": _clip((entry.get("catalogCode") or "").strip()) or None,
                 "description": description,
                 "unit": _clip((entry.get("unit") or "").strip(), limit=30) or None,
@@ -1672,29 +1875,63 @@ def _parse_transaction_items(raw_json):
     return items
 
 
+#: The Add/Edit form's single "Type" select drives BOTH direction and reason from one
+#: choice - matching the 4 legacy sub-types (Stock In manual/PO, Stock Out manual/return)
+#: rather than a bare In/Out toggle with reason inferred awkwardly from which optional
+#: fields happened to be filled in.
+STOCK_TYPES = {
+    "stock_in_manual": ("IN", "Manual"),
+    "stock_in_po": ("IN", "Purchase Order"),
+    "stock_out_manual": ("OUT", "Manual"),
+    "stock_out_return": ("OUT", "Return to Supplier"),
+}
+
+
 def _parse_warehouse_transaction_form():
-    direction = "IN" if request.form.get("direction", "").strip().lower() == "in" else "OUT"
-    items = _parse_transaction_items(request.form.get("itemsJson"))
+    stock_type = request.form.get("stockType", "").strip()
+    direction, reason = STOCK_TYPES.get(stock_type, ("IN", "Manual"))
 
     purchase_order_id = None
     po_number = None
     supplier_invoice = None
+    invoice_amount = None
     si_number = customer_po = dr_number = supplier_dr_number = None
+    valid_po_item_ids = None
 
-    if direction == "IN":
+    if stock_type == "stock_in_po":
         po_id_raw = request.form.get("purchaseOrderId", "").strip()
         po = purchase_orders_repo.get_purchase_order(int(po_id_raw)) if po_id_raw.isdigit() else None
         if po:
             purchase_order_id = po["id"]
             po_number = po["poNumber"]
-        reason = "Purchase Order" if po else "Manual"
+            # Only line items sourced from THIS PO's own items can carry a
+            # purchaseOrderItemId - guards against a tampered payload claiming to
+            # receive against a line that belongs to a different PO.
+            valid_po_item_ids = {i["id"] for i in purchase_orders_repo.get_items_for_purchase_order(po["id"])}
+        else:
+            reason = "Manual"  # PO picked-then-cleared falls back to a plain manual stock-in
         supplier_invoice = _clip(request.form.get("supplierInvoice", "").strip(), limit=100) or None
-    else:
-        reason = "Manual"
+        invoice_amount = _parse_coordinate(request.form.get("invoiceAmount", ""))
+        dr_number = _clip(request.form.get("drNumber", "").strip(), limit=50) or None
+    elif stock_type == "stock_out_return":
+        # A reference back to the PO the returned goods were originally received against -
+        # optional (legacy tried to capture this too but a bug meant it never actually
+        # saved; this app persists it for real). Not required: a return can still be
+        # recorded even if which PO it traces back to isn't known/relevant.
+        po_id_raw = request.form.get("purchaseOrderId", "").strip()
+        po = purchase_orders_repo.get_purchase_order(int(po_id_raw)) if po_id_raw.isdigit() else None
+        if po:
+            purchase_order_id = po["id"]
+            po_number = po["poNumber"]
+        supplier_invoice = _clip(request.form.get("supplierInvoice", "").strip(), limit=100) or None
+        dr_number = _clip(request.form.get("drNumber", "").strip(), limit=50) or None
+
+    if direction == "OUT" and stock_type != "stock_out_return":
         si_number = _clip(request.form.get("siNumber", "").strip(), limit=50) or None
         customer_po = _clip(request.form.get("customerPo", "").strip(), limit=100) or None
-        dr_number = _clip(request.form.get("drNumber", "").strip(), limit=50) or None
         supplier_dr_number = _clip(request.form.get("supplierDrNumber", "").strip(), limit=50) or None
+
+    items = _parse_transaction_items(request.form.get("itemsJson"), valid_po_item_ids, direction=direction)
 
     return {
         "direction": direction,
@@ -1702,6 +1939,7 @@ def _parse_warehouse_transaction_form():
         "purchaseOrderId": purchase_order_id,
         "poNumber": po_number,
         "supplierInvoice": supplier_invoice,
+        "invoiceAmount": invoice_amount,
         "siNumber": si_number,
         "customerPo": customer_po,
         "drNumber": dr_number,
@@ -1717,12 +1955,37 @@ def _parse_warehouse_transaction_form():
     }
 
 
+def _validate_stock_out_quantities(data):
+    """For Stock Out (manual or Return to Supplier), each line must name an EXISTING
+    on-hand lot (itemId + lot + expiryDate, within this branch) and not deplete more than
+    what's actually on hand - legacy only enforced this client-side (an HTML `max`
+    attribute), which a tampered/replayed request bypasses entirely. Returns a list of
+    human-readable error messages; empty means every line is valid."""
+    if data["direction"] != "OUT" or not data["items"]:
+        return []
+    balances = warehouse_transactions_repo.get_stock_balance_map()
+    errors = []
+    for idx, item in enumerate(data["items"], start=1):
+        key = (item["itemId"], data["branch"], item["lot"], item["expiryDate"])
+        on_hand = balances.get(key, 0)
+        if item["quantity"] > on_hand:
+            errors.append(
+                f'Line item {idx} ({item["description"]}): only {on_hand} on hand for that lot, '
+                f'cannot stock out {item["quantity"]}.'
+            )
+    return errors
+
+
 @main_bp.route("/page/warehouse_transactions/add", methods=["POST"])
 @login_required
 def warehouse_transaction_add():
     data = _parse_warehouse_transaction_form()
     if not data["items"]:
         flash("Add at least one line item — every item needs a description and quantity.", "error")
+        return redirect(url_for("main.warehouse_transactions"))
+    stock_out_errors = _validate_stock_out_quantities(data)
+    if stock_out_errors:
+        flash(" ".join(stock_out_errors), "error")
         return redirect(url_for("main.warehouse_transactions"))
 
     try:
@@ -1751,6 +2014,10 @@ def warehouse_transaction_edit(txn_id):
     data = _parse_warehouse_transaction_form()
     if not data["items"]:
         flash("Add at least one line item — every item needs a description and quantity.", "error")
+        return redirect(url_for("main.warehouse_transactions"))
+    stock_out_errors = _validate_stock_out_quantities(data)
+    if stock_out_errors:
+        flash(" ".join(stock_out_errors), "error")
         return redirect(url_for("main.warehouse_transactions"))
 
     try:
@@ -2401,7 +2668,7 @@ def _payables_list_page(has_po):
         mode="po" if has_po else "non_po",
         suppliers=suppliers_repo.list_active_suppliers(),
         purchase_orders=(
-            [_po_for_picker(po) for po in purchase_orders_repo.list_purchase_orders(status="Approved")]
+            [_po_for_picker(po) for po in purchase_orders_repo.list_purchase_orders(status=("Delivered", "Partially Delivered"))]
             if has_po else []
         ),
         search=search,

@@ -1,0 +1,225 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>PO Printout - {{ po.poNumber }}</title>
+    <style>
+        @page { size: letter; margin: 0.4in; }
+        body { font-family: Arial, Helvetica, sans-serif; color: black; }
+        .Container { width: 1000px; height: auto; margin: auto; position: relative; }
+        .Logo { margin: auto; position: relative; height: 80px; width: 100%; text-align: center; }
+        .Logo img { width: 900px; height: 80px; position: relative; margin: auto; }
+        .POForm { margin: auto; position: relative; width: 980px; height: auto; }
+        .POForm table { width: 900px; margin: auto; border-collapse: collapse; }
+        .a { font-weight: bold; }
+        .b { border-bottom: 1px solid black; }
+        .C { text-align: center; }
+
+        .productsDiv { width: 980px; position: relative; margin: auto; top: 10px; height: auto; padding-bottom: 20px; }
+        .productsDiv table { width: 98%; border: 1px solid black; border-collapse: collapse; margin: auto; }
+        .productsDiv table th, .productsDiv table td { border: 1px solid black; height: 30px; padding: 2px 6px; text-align: left; }
+        .productsDiv table td:nth-child(4), .productsDiv table td:nth-child(5), .productsDiv table td:nth-child(6) { text-align: right; }
+
+        .signatories { width: 800px; margin: auto; }
+        .signatories table { width: 100%; }
+        .signatories table tr td { width: 50%; height: auto; }
+
+        .footer { position: relative; bottom: 0; right: 0; color: black; padding: 10px 20px; font-size: 14px; }
+
+        @media print {
+            .no-print { display: none; }
+        }
+    </style>
+</head>
+<body>
+<div class="no-print" style="text-align:center; padding:10px;">
+    <button type="button" onclick="window.print()">Print</button>
+</div>
+<div class="container">
+    {% if branch == 'Bicol' %}
+    {% else %}
+    <div class="footer">OAMS-OP-PUR-01F2<br>Rev 00</div>
+    {% endif %}
+
+    <div class="Logo">
+        <img src="{{ url_for('static', filename='img/POBanner.jpg') }}">
+    </div>
+    <center><h3>PURCHASE ORDER</h3></center>
+
+    <div class="POForm">
+        <table>
+            <tr>
+                <td class="a" width="80px">Supplier:</td>
+                <td class="a b" colspan="3">{{ po.supplierName or '' }}</td>
+                <td colspan="2" rowspan="3"></td>
+                <td class="a" width="70px">P.O. No.</td>
+                <td class="b" width="120px">{{ po.poNumber }}{{ 'Bicol' if branch == 'Bicol' else '' }}</td>
+            </tr>
+            <tr>
+                <td class="a">Address:</td>
+                <td colspan="3" class="b">{{ po.supplierAddress or '' }}</td>
+                <td class="a">Date:</td>
+                <td class="b">{{ po.orderDate or '' }}</td>
+            </tr>
+            <tr>
+                <td class="a">Tel No.</td>
+                <td width="200px" class="b">{{ po.supplierTelephone or '' }}</td>
+                <td class="a" width="80px">Fax No.</td>
+                <td class="b" width="100px">{{ po.supplierFax or '' }}</td>
+            </tr>
+            <tr>
+                <td class="a">Email</td>
+                <td class="b">{{ po.supplierEmail or '' }}</td>
+            </tr>
+        </table>
+        <br>
+        <table>
+            {% if branch == 'Bicol' %}
+            <tr>
+                <td class="a" width="125px">Place of Delivery:</td>
+                <td class="a b" width="350px">One AMS Bicol</td>
+                <td rowspan="7" width="100px"></td>
+                <td class="a" width="120px">Delivery Term:</td>
+                <td class="b">{{ po.deliveryTerm or '' }}</td>
+            </tr>
+            <tr>
+                <td rowspan="4"></td>
+                <td class="b">Lots 4 &amp; 5, Block 3 Corner of Road</td>
+                <td class="a">Payment Term:</td>
+                <td class="b">{{ po.paymentTerm or '' }}</td>
+            </tr>
+            <tr>
+                <td class="b">Lot 1 and Road Lot 2, Parkview</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td class="b">Executive Townhomes Brgy. San Felipe</td>
+                <td class="a">Date of Delivery:</td>
+                <td class="b">{{ po.deliveryDate or '' }}</td>
+            </tr>
+            <tr>
+                <td class="b">Naga City</td>
+            </tr>
+            <tr>
+                <td class="a">Tel No.</td>
+                <td class="b">(049)502-0314;8315040</td>
+            </tr>
+            <tr>
+                <td class="a">Mobile No.</td>
+                <td class="b">09178216261/09238984858</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td class="a" width="125px">Place of Delivery:</td>
+                <td class="a b" width="350px">ONE AGNO MEDICAL SOLUTIONS</td>
+                <td rowspan="7" width="100px"></td>
+                <td class="a" width="120px">Delivery Term:</td>
+                <td class="b">{{ po.deliveryTerm or '' }}</td>
+            </tr>
+            <tr>
+                <td rowspan="4"></td>
+                <td class="b">One AMS Bldg.,Block 1,Lot 17,</td>
+                <td class="a">Payment Term:</td>
+                <td class="b">{{ po.paymentTerm or '' }}</td>
+            </tr>
+            <tr>
+                <td class="b">Kayamanan St., Tierra Valiente Subd.,</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td class="b">Pamana Homes, Brgy.Bucal Calamba City</td>
+                <td class="a">Date of Delivery:</td>
+                <td class="b">{{ po.deliveryDate or '' }}</td>
+            </tr>
+            <tr>
+                <td class="b">Laguna 4027</td>
+            </tr>
+            <tr>
+                <td class="a">Tel No.</td>
+                <td class="b">(049)502-0314;8315040</td>
+            </tr>
+            <tr>
+                <td class="a">Mobile No.</td>
+                <td class="b">09178216261/09238984858</td>
+            </tr>
+            {% endif %}
+        </table>
+    </div>
+
+    <br>
+    {% if branch != 'Bicol' %}
+    <div style="text-align:center;">{{ po.notes or '' }}</div>
+    {% endif %}
+
+    <div class="productsDiv">
+        <table>
+            <tr>
+                <th>Catalogue No.</th>
+                <th>Unit</th>
+                <th>Description</th>
+                <th>Quantity</th>
+                <th>Unit Cost</th>
+                <th>Amount</th>
+            </tr>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.catalogCode or '' }}</td>
+                <td>{{ item.unit or '' }}</td>
+                <td>{{ item.description or '' }}</td>
+                <td>{{ '{:,.2f}'.format(item.quantity) if item.quantity is not none else '' }}</td>
+                <td>{{ '{:,.2f}'.format(item.unitCost) if item.unitCost is not none else '' }}</td>
+                <td>{{ '{:,.2f}'.format(item.amount) if item.amount is not none else '' }}</td>
+            </tr>
+            {% endfor %}
+            <tr><td colspan="6" style="border:none;height:8px;"></td></tr>
+            <tr>
+                <td colspan="4" style="border:none;"></td>
+                <td class="a">Vatable Sales</td>
+                <td>{{ '{:,.2f}'.format(po.vatableAmount) if po.vatableAmount is not none else '0.00' }}</td>
+            </tr>
+            <tr>
+                <td colspan="4" style="border:none;"></td>
+                <td class="a">VAT</td>
+                <td>{{ '{:,.2f}'.format(po.vatAmount) if po.vatAmount is not none else '0.00' }}</td>
+            </tr>
+            <tr>
+                <td colspan="4" style="border:none;"></td>
+                <td class="a">Total Sales</td>
+                <td>{{ '{:,.2f}'.format(po.totalAmount) if po.totalAmount is not none else '0.00' }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <br><br><br>
+    <div class="signatories">
+        <table>
+            <tr>
+                <td class="a">Prepared By:</td>
+                <td class="a">Approved By:</td>
+            </tr>
+            <tr><td>&nbsp;</td><td>&nbsp;</td></tr>
+            <tr><td>&nbsp;</td><td>&nbsp;</td></tr>
+            <tr>
+                {% if branch == 'Bicol' %}
+                <td height="100px">MARILYN BALMACEDA<br>Supply Chain Officer<br>
+                    <img src="{{ url_for('static', filename='img/LynSign.png') }}" width="100px" height="50px" style="position:relative;top:-80px;">
+                </td>
+                {% else %}
+                <td height="100px">ROZELLYN YULATIC<br>Supply Chain Officer<br>
+                    <img src="{{ url_for('static', filename='img/RoseSign.png') }}" width="100px" height="50px" style="position:relative;top:-80px;">
+                </td>
+                {% endif %}
+                <td height="100px">NORIEL R AGNO, RMT<br>Chief Executive Officer<br>
+                    <img src="{{ url_for('static', filename='img/SirNorielSign.png') }}" width="100px" height="50px" style="position:relative;top:-80px;">
+                </td>
+            </tr>
+            <tr><td></td></tr>
+        </table>
+    </div>
+
+    {% if branch == 'Bicol' %}
+    <div class="footer">OAMS-OP-PUR-01F2<br>Rev 00</div>
+    {% endif %}
+</div>
+</body>
+</html>

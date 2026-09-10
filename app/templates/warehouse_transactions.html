@@ -98,6 +98,7 @@
                         data-dr-number="{{ t.drNumber or '' }}"
                         data-customer-po="{{ t.customerPo or '' }}"
                         data-supplier-invoice="{{ t.supplierInvoice or '' }}"
+                        data-invoice-amount="{{ t.invoiceAmount or '' }}"
                         data-supplier-dr-number="{{ t.supplierDrNumber or '' }}"
                         data-care-to="{{ t.careTo or '' }}"
                         data-note="{{ t.note or '' }}"
@@ -120,7 +121,8 @@
                         </td>
                         <td class="table-td text-sm">{{ t.createdAt.strftime('%b %d, %Y') if t.createdAt else '—' }}</td>
                         <td class="table-td truncate text-sm">
-                            {% if t.poNumber %}PO {{ t.poNumber }}
+                            {% if t.reason == 'Return to Supplier' %}Return{% if t.poNumber %} (PO {{ t.poNumber }}){% endif %}
+                            {% elif t.poNumber %}PO {{ t.poNumber }}
                             {% elif t.siNumber %}SI {{ t.siNumber }}
                             {% elif t.drNumber %}DR {{ t.drNumber }}
                             {% else %}{{ t.reason }}{% endif %}
@@ -185,7 +187,7 @@
 
 <!-- ===================== Add Transaction modal ===================== -->
 <div id="recordModal" data-modal class="modal-backdrop hidden">
-    <div class="modal-panel max-w-3xl">
+    <div class="modal-panel max-w-5xl">
         <form id="recordForm" method="POST" action="{{ url_for('main.warehouse_transaction_add') }}">
             <div class="modal-header">
                 <h3 class="modal-title" id="recordModalTitle">Add Transaction</h3>
@@ -197,49 +199,64 @@
             <div class="modal-body space-y-5">
 
                 <div>
-                    <label class="label">Direction <span class="text-accent-600">*</span></label>
-                    <div class="flex items-center gap-4">
-                        <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                            <input type="radio" class="checkbox" name="direction" value="in" id="directionIn" checked> Stock In
-                        </label>
-                        <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                            <input type="radio" class="checkbox" name="direction" value="out" id="directionOut"> Stock Out
-                        </label>
-                    </div>
+                    <label class="label" for="fieldStockType">Type <span class="text-accent-600">*</span></label>
+                    <select class="input" id="fieldStockType" name="stockType">
+                        <option value="stock_in_manual">Stock In — Manual</option>
+                        <option value="stock_in_po">Stock In — From Purchase Order</option>
+                        <option value="stock_out_manual">Stock Out — Manual</option>
+                        <option value="stock_out_return">Stock Out — Return to Supplier</option>
+                    </select>
                 </div>
 
-                <div id="stockInFields">
+                <div id="stockInPoFields" class="hidden space-y-4">
                     <div class="relative" data-dropdown>
-                        <label class="label" for="poSearchInput">Purchase Order (optional)</label>
-                        <input type="text" class="input" id="poSearchInput" placeholder="Search an Approved PO, or leave blank for Manual…" autocomplete="off">
+                        <label class="label" for="poSearchInput">Purchase Order <span class="text-accent-600">*</span></label>
+                        <input type="text" class="input" id="poSearchInput" placeholder="Search a receivable PO…" autocomplete="off">
                         <input type="hidden" id="fieldPurchaseOrderId" name="purchaseOrderId">
                         <div data-dropdown-panel id="poOptions"
                              class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
-                        <p class="help">Leave blank for an ad-hoc / manual stock-in with no Purchase Order.</p>
                     </div>
-                    <div class="mt-4">
-                        <label class="label" for="fieldSupplierInvoice">Supplier Invoice #</label>
-                        <input type="text" class="input" id="fieldSupplierInvoice" name="supplierInvoice">
+                    <div id="loadPoItemsWrap" class="hidden">
+                        <button type="button" class="btn btn-secondary" id="loadPoItemsBtn">
+                            <i data-lucide="download" class="h-4 w-4"></i>Load Outstanding Items from PO
+                        </button>
+                        <span id="loadPoItemsSuccess" class="ml-2 hidden items-center gap-1 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                            <i data-lucide="check-circle-2" class="h-4 w-4"></i>Loaded
+                        </span>
+                        <p class="help">Replaces the line items below with this PO's items still awaiting delivery, so this receipt counts against them.</p>
+                    </div>
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <div>
+                            <label class="label" for="fieldSupplierInvoice">Supplier Invoice #</label>
+                            <input type="text" class="input" id="fieldSupplierInvoice" name="supplierInvoice">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldDrNumberIn">DR Number</label>
+                            <input type="text" class="input" id="fieldDrNumberIn" name="drNumber">
+                        </div>
+                        <div>
+                            <label class="label" for="fieldInvoiceAmount">Invoice Amount</label>
+                            <input type="number" class="input" id="fieldInvoiceAmount" name="invoiceAmount" min="0" step="0.01">
+                        </div>
                     </div>
                 </div>
 
-                <div id="stockOutFields" class="hidden space-y-4">
+                <div id="stockOutReturnFields" class="hidden space-y-4">
+                    <div class="relative" data-dropdown>
+                        <label class="label" for="returnPoSearchInput">Purchase Order (optional reference)</label>
+                        <input type="text" class="input" id="returnPoSearchInput" placeholder="Which PO was this originally received against?…" autocomplete="off">
+                        <input type="hidden" id="fieldReturnPurchaseOrderId" name="purchaseOrderId">
+                        <div data-dropdown-panel id="returnPoOptions"
+                             class="hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+                    </div>
                     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div>
-                            <label class="label" for="fieldSiNumber">SI Number</label>
-                            <input type="text" class="input" id="fieldSiNumber" name="siNumber">
+                            <label class="label" for="fieldReturnSupplierInvoice">Supplier Invoice # (reference)</label>
+                            <input type="text" class="input" id="fieldReturnSupplierInvoice" name="supplierInvoice">
                         </div>
                         <div>
-                            <label class="label" for="fieldDrNumber">DR Number</label>
-                            <input type="text" class="input" id="fieldDrNumber" name="drNumber">
-                        </div>
-                        <div>
-                            <label class="label" for="fieldCustomerPo">Customer PO #</label>
-                            <input type="text" class="input" id="fieldCustomerPo" name="customerPo">
-                        </div>
-                        <div>
-                            <label class="label" for="fieldSupplierDrNumber">Supplier DR Number</label>
-                            <input type="text" class="input" id="fieldSupplierDrNumber" name="supplierDrNumber">
+                            <label class="label" for="fieldDrNumberReturn">DR Number (reference)</label>
+                            <input type="text" class="input" id="fieldDrNumberReturn" name="drNumber">
                         </div>
                     </div>
                 </div>
@@ -251,16 +268,25 @@
                     </div>
                     <div>
                         <label class="label" for="fieldBranch">Branch</label>
-                        <input type="text" class="input" id="fieldBranch" name="branch" placeholder="e.g. Calamba">
+                        <select class="input" id="fieldBranch" name="branch"></select>
                     </div>
                 </div>
 
                 <div class="border-t border-slate-200 pt-5 dark:border-slate-800">
                     <label class="label">Line Items <span class="text-accent-600">*</span></label>
-                    <p class="help mb-3">
+                    <p class="help mb-3" id="itemsHelp">
                         Search the item catalog to fill in description and unit, or type your own.
                     </p>
 
+                    <div class="mb-1.5 hidden gap-2 px-1 lg:flex">
+                        <span class="w-8 shrink-0"></span>
+                        <span class="min-w-[14rem] flex-1 label mb-0">Catalog / Description</span>
+                        <span class="w-20 shrink-0 label mb-0">Unit</span>
+                        <span class="w-24 shrink-0 label mb-0">Qty</span>
+                        <span class="w-28 shrink-0 label mb-0">Lot</span>
+                        <span class="w-40 shrink-0 label mb-0">Expiry Date</span>
+                        <span class="w-8 shrink-0"></span>
+                    </div>
                     <div id="itemsList" class="space-y-3"></div>
 
                     <button type="button" class="btn btn-secondary mt-3" id="addItemBtn">
@@ -290,40 +316,48 @@
    itemRowTemplate: markup lives with the rest of the HTML, and template.content is a
    detached fragment so lucide.createIcons() doesn't scan it prematurely. #}
 <template id="itemRowTemplate">
-    <div class="js-item-row rounded-xl border border-slate-200 p-4 dark:border-slate-700" data-item="">
-        <div class="mb-3 flex items-center justify-between gap-2">
-            <span class="js-item-number grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-50
+    <div class="js-item-row rounded-xl border border-slate-200 p-3 dark:border-slate-700" data-item="">
+        <div class="flex flex-wrap items-end gap-2 lg:flex-nowrap">
+            <span class="js-item-number grid h-8 w-8 shrink-0 place-items-center self-end rounded-full bg-brand-50
                          text-xs font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400"></span>
-            <button type="button" class="js-remove-item btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+
+            <div class="relative min-w-[14rem] flex-1" data-dropdown>
+                <label class="label lg:hidden">Catalog / Description <span class="text-accent-600">*</span></label>
+                <input type="text" class="js-item-catalog-search input" autocomplete="off" placeholder="Search catalog # or item name…">
+                <div class="js-item-catalog-panel hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg
+                            border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
+            </div>
+
+            <div class="w-20 shrink-0">
+                <label class="label lg:hidden">Unit</label>
+                <input type="text" class="js-item-unit input cursor-not-allowed bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400" readonly tabindex="-1">
+            </div>
+            <div class="w-24 shrink-0">
+                <label class="label lg:hidden">Qty <span class="text-accent-600">*</span></label>
+                <input type="number" class="js-item-quantity input" min="1" step="1">
+                <p class="js-item-max-hint help hidden"></p>
+            </div>
+            <div class="w-28 shrink-0">
+                <label class="label lg:hidden">Lot</label>
+                <input type="text" class="js-item-lot input">
+            </div>
+            <div class="w-40 shrink-0">
+                <label class="label lg:hidden">Expiry Date</label>
+                <input type="date" class="js-item-expiry input">
+            </div>
+            <button type="button" class="js-remove-item btn btn-icon shrink-0 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
                     data-action="remove-item" aria-label="Remove this line item">
                 <i data-lucide="trash-2" class="h-4 w-4"></i>
             </button>
         </div>
 
-        <div class="relative" data-dropdown>
-            <label class="label">Catalog / Description <span class="text-accent-600">*</span></label>
-            <input type="text" class="js-item-catalog-search input" autocomplete="off" placeholder="Search catalog # or item name, or type your own…">
-            <div class="js-item-catalog-panel hidden absolute z-[1200] mt-1 max-h-56 w-full overflow-y-auto rounded-lg
-                        border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800"></div>
-        </div>
-
-        <div class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div>
-                <label class="label">Unit</label>
-                <input type="text" class="js-item-unit input">
-            </div>
-            <div>
-                <label class="label">Quantity <span class="text-accent-600">*</span></label>
-                <input type="number" class="js-item-quantity input" min="1" step="1">
-            </div>
-            <div>
-                <label class="label">Lot</label>
-                <input type="text" class="js-item-lot input">
-            </div>
-            <div>
-                <label class="label">Expiry Date</label>
-                <input type="date" class="js-item-expiry input">
-            </div>
+        {# Only shown for a row loaded from "Load Outstanding Items from PO" - the ordered
+           and already-served quantities are read-only context for the editable Qty
+           (Received) field above, matching legacy's PO stock-in table (Quantity Ordered /
+           Quantity Served / Quantity Received as three distinct columns). #}
+        <div class="js-item-po-ref hidden mt-2 flex gap-4 text-xs text-slate-500 dark:text-slate-400">
+            <span>Ordered: <span class="js-item-ordered font-medium"></span></span>
+            <span>Already Served: <span class="js-item-served font-medium"></span></span>
         </div>
 
         {# Only shown when the picked catalog item has a packSize on record - a plain
@@ -419,21 +453,61 @@
 {% block scripts %}
 <script>
     (function () {
-        var APPROVED_POS = {{ approved_purchase_orders|tojson }};
+        var RECEIVABLE_POS = {{ receivable_purchase_orders|tojson }};
+        var REFERENCE_POS = {{ reference_purchase_orders|tojson }};
         var INVENTORY_ITEMS = {{ inventory_items|tojson }};
+        var STOCK_BALANCES = {{ stock_balances|tojson }};
+        var ALL_BRANCHES = {{ all_branches|tojson }};
+        var USER_BRANCH = {{ (session.get('user_branch') or '')|tojson }};
+        var CURRENT_USER_NAME = {{ (session.get('user_name') or '')|tojson }};
 
         var recordForm = document.getElementById('recordForm');
         var tbody = document.getElementById('recordsBody');
 
+        /* ------------------------------------------------- branch combobox
+           Same "one branch -> locked, several -> pick among just those, none assigned ->
+           pick from every known branch" pattern as purchase_orders.html's setupBranchField. */
+        var fieldBranch = document.getElementById('fieldBranch');
+        var userBranches = (USER_BRANCH || '').split(',').map(function (b) { return b.trim(); }).filter(Boolean);
+
+        function setupBranchField(selected) {
+            var options = userBranches.length ? userBranches : ALL_BRANCHES;
+            fieldBranch.innerHTML = '';
+            if (!options.length) {
+                var opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'Select branch';
+                fieldBranch.appendChild(opt);
+                return;
+            }
+            options.forEach(function (b) {
+                var o = document.createElement('option');
+                o.value = b;
+                o.textContent = b;
+                fieldBranch.appendChild(o);
+            });
+            fieldBranch.value = (selected && options.indexOf(selected) !== -1) ? selected : options[0];
+            // Not actually disabled (a disabled <select> doesn't submit its value) - with
+            // only one option there's nothing else to pick anyway, so this is effectively
+            // locked without needing a second hidden field to carry the value.
+        }
+
         var escapeHtml = Pickers.escapeHtml;
 
-        /* ------------------------------------------------- searchable PO picker
-           Same [data-dropdown] contract as purchase_orders.html's initSearchablePicker. */
+        /* ------------------------------------------------- searchable PO pickers
+           Two separate instances (Stock In's "which PO to receive against" and Return to
+           Supplier's "which PO this traces back to") - same [data-dropdown] contract as
+           purchase_orders.html's initSearchablePicker, just fed from different lists
+           (see routes.warehouse_transactions() for why the two eligible-PO lists differ). */
         var closeAllOtherDropdowns = Pickers.closeAllOtherDropdowns;
         var initSearchablePicker = Pickers.initSearchablePicker;
 
         var poPicker = initSearchablePicker(
-            'poSearchInput', 'fieldPurchaseOrderId', 'poOptions', APPROVED_POS,
+            'poSearchInput', 'fieldPurchaseOrderId', 'poOptions', RECEIVABLE_POS,
+            function (po) { return po.id; }, function (po) { return po.poNumber + ' — ' + (po.supplierName || ''); }
+        );
+        var returnPoPicker = initSearchablePicker(
+            'returnPoSearchInput', 'fieldReturnPurchaseOrderId', 'returnPoOptions', REFERENCE_POS,
             function (po) { return po.id; }, function (po) { return po.poNumber + ' — ' + (po.supplierName || ''); }
         );
 
@@ -449,28 +523,58 @@
         fieldPurchaseOrderId.addEventListener('change', function () {
             if (fieldSupplierInvoice.value.trim()) return;
             var selectedId = fieldPurchaseOrderId.value;
-            var po = APPROVED_POS.find(function (p) { return String(p.id) === selectedId; });
+            var po = RECEIVABLE_POS.find(function (p) { return String(p.id) === selectedId; });
             if (!po) return;
             var last = LAST_SUPPLIER_INVOICE[po.supplierId];
             if (last != null) fieldSupplierInvoice.value = last + 1;
         });
 
-        /* ------------------------------------------------- direction toggle */
-        var stockInFields = document.getElementById('stockInFields');
-        var stockOutFields = document.getElementById('stockOutFields');
+        /* ------------------------------------------------- Type select
+           One choice drives BOTH direction and which optional fields show, matching the 4
+           legacy sub-types (Stock In manual/PO, Stock Out manual/return) rather than a bare
+           In/Out toggle with reason inferred from whichever fields happened to be filled. */
+        var fieldStockType = document.getElementById('fieldStockType');
+        var stockInPoFields = document.getElementById('stockInPoFields');
+        var stockOutReturnFields = document.getElementById('stockOutReturnFields');
         var careToLabel = document.getElementById('careToLabel');
+        var itemsHelp = document.getElementById('itemsHelp');
+        var loadPoItemsWrap = document.getElementById('loadPoItemsWrap');
 
-        function applyDirection(value) {
-            var isIn = value === 'in';
-            document.getElementById(isIn ? 'directionIn' : 'directionOut').checked = true;
-            stockInFields.classList.toggle('hidden', !isIn);
-            stockOutFields.classList.toggle('hidden', isIn);
-            careToLabel.textContent = isIn ? 'Received By' : 'Customer / Care Of';
+        function currentDirection() {
+            var t = fieldStockType.value;
+            return (t === 'stock_in_manual' || t === 'stock_in_po') ? 'IN' : 'OUT';
+        }
+        function isStockOut() { return currentDirection() === 'OUT'; }
+
+        // Disabling a hidden panel's own inputs (not just visually hiding it) matters here:
+        // Stock In(PO) and Return to Supplier post to the SAME field names (purchaseOrderId/
+        // supplierInvoice/drNumber) from two DIFFERENT elements, one per panel - a browser
+        // submits every same-named input regardless of CSS visibility, so only one of the
+        // two must ever be enabled at a time or both values would be sent.
+        function setPanelEnabled(panel, enabled) {
+            panel.classList.toggle('hidden', !enabled);
+            panel.querySelectorAll('input, select, textarea').forEach(function (el) { el.disabled = !enabled; });
         }
 
-        document.querySelectorAll('input[name="direction"]').forEach(function (radio) {
-            radio.addEventListener('change', function () { applyDirection(this.value); });
-        });
+        function applyStockType(value, opts) {
+            fieldStockType.value = value;
+            var isInPo = value === 'stock_in_po';
+            var isOutReturn = value === 'stock_out_return';
+            setPanelEnabled(stockInPoFields, isInPo);
+            setPanelEnabled(stockOutReturnFields, isOutReturn);
+            careToLabel.textContent = currentDirection() === 'IN' ? 'Received By' : 'Customer / Care Of';
+            if (!isInPo) {
+                poPicker.reset();
+                loadPoItemsWrap.classList.add('hidden');
+            }
+            if (!isOutReturn) returnPoPicker.reset();
+            itemsHelp.textContent = isStockOut()
+                ? 'Pick an existing on-hand lot to deplete - quantity is capped to what\'s actually on hand.'
+                : 'Search the item catalog to fill in description and unit, or type your own.';
+            if (!(opts && opts.skipReset)) resetItems();
+        }
+
+        fieldStockType.addEventListener('change', function () { applyStockType(this.value); });
 
         /* ------------------------------------------------- line items
            Rows keyed by a minted uid, never array index - same reasoning as
@@ -508,6 +612,21 @@
                 // field value, editable by hand) so switching the toggle back to
                 // "Pieces" can restore it after "Box" mode overwrote `unit`.
                 packSize: null, purchaseUnit: '', baseUnit: '', unitMode: 'base',
+                // Set only when this row came from "Load Outstanding Items from PO" -
+                // that's what lets warehouse_transactions_repo.verify() attribute this
+                // receipt back onto a specific PO line's quantityServed. A row typed/picked
+                // manually (even while a PO is selected at the header level) stays null and
+                // has no such effect, same as today's header-only PO link.
+                purchaseOrderItemId: null,
+                // Display-only context for a PO-sourced row (never submitted) - the ordered
+                // and already-served quantities, shown read-only next to the editable Qty
+                // (Received) field, matching legacy's 3-column PO stock-in table.
+                orderedQuantity: null, servedQuantity: null,
+                // Set only in Stock Out mode, once a specific on-hand lot has been picked -
+                // both the client's own submit-time check and the server's re-validation
+                // (routes._validate_stock_out_quantities) use this to stop a stock-out from
+                // depleting more than what's actually on hand.
+                maxOnHand: null,
             };
         }
 
@@ -537,6 +656,48 @@
             updatePackPreview(row, item);
         }
 
+        function updatePoRefDisplay(row, item) {
+            var wrap = row.querySelector('.js-item-po-ref');
+            if (item.orderedQuantity == null) {
+                wrap.classList.add('hidden');
+                return;
+            }
+            wrap.classList.remove('hidden');
+            wrap.querySelector('.js-item-ordered').textContent = item.orderedQuantity;
+            wrap.querySelector('.js-item-served').textContent = item.servedQuantity;
+        }
+
+        function updateMaxHint(row, item) {
+            var hint = row.querySelector('.js-item-max-hint');
+            var qtyInput = row.querySelector('.js-item-quantity');
+            if (item.maxOnHand != null) {
+                qtyInput.max = item.maxOnHand;
+                hint.textContent = 'Max ' + item.maxOnHand + ' on hand';
+                hint.classList.remove('hidden');
+            } else {
+                qtyInput.removeAttribute('max');
+                hint.classList.add('hidden');
+            }
+        }
+
+        // Every on-hand lot for the currently-typed Branch (case-insensitive exact match) -
+        // Stock Out can only deplete a lot that actually has stock right now, mirroring
+        // legacy's on-hand-only catalog source for Stock Out/Return to Supplier.
+        function availableLots() {
+            var branch = (document.getElementById('fieldBranch').value || '').trim().toLowerCase();
+            return STOCK_BALANCES.filter(function (b) {
+                return b.onHand > 0 && (!branch || (b.branch || '').trim().toLowerCase() === branch);
+            });
+        }
+
+        function lotLabel(b) {
+            var bits = [b.catalogCode, b.description].filter(Boolean).join(' — ');
+            var lotBits = [];
+            if (b.lot) lotBits.push('Lot ' + b.lot);
+            if (b.expiryDate) lotBits.push('Exp ' + b.expiryDate);
+            return bits + (lotBits.length ? ' [' + lotBits.join(', ') + ']' : '') + ' — ' + b.onHand + ' on hand';
+        }
+
         function initItemCatalogPicker(row, item) {
             var input = row.querySelector('.js-item-catalog-search');
             var panel = row.querySelector('.js-item-catalog-panel');
@@ -546,6 +707,22 @@
 
             function render(filterText) {
                 var term = (filterText || '').trim().toLowerCase();
+                if (isStockOut()) {
+                    var lots = availableLots().filter(function (b) {
+                        return !term
+                            || (b.catalogCode || '').toLowerCase().indexOf(term) !== -1
+                            || (b.description || '').toLowerCase().indexOf(term) !== -1
+                            || (b.lot || '').toLowerCase().indexOf(term) !== -1;
+                    }).slice(0, 30);
+                    panel.innerHTML = lots.length
+                        ? lots.map(function (b, idx) {
+                            return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-idx="' + idx + '">'
+                                + escapeHtml(lotLabel(b)) + '</button>';
+                        }).join('')
+                        : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No on-hand lots match - enter a Branch above, or nothing is on hand there</p>';
+                    panel._matches = lots;
+                    return;
+                }
                 var matches = !term ? [] : INVENTORY_ITEMS.filter(function (inv) {
                     return inv.catalog.toLowerCase().indexOf(term) !== -1
                         || (inv.description || '').toLowerCase().indexOf(term) !== -1;
@@ -559,11 +736,32 @@
                 panel._matches = matches;
             }
 
-            panel.addEventListener('click', function (e) {
-                var btn = e.target.closest('button[data-idx]');
-                if (!btn || !panel._matches) return;
-                var inv = panel._matches[parseInt(btn.getAttribute('data-idx'), 10)];
-                if (!inv) return;
+            function selectLot(b) {
+                item.itemId = b.itemId;
+                item.catalogCode = b.catalogCode;
+                item.description = b.description || '';
+                item.unit = b.unit || '';
+                item.lot = b.lot || '';
+                item.expiryDate = b.expiryDate || '';
+                item.maxOnHand = b.onHand;
+                item.purchaseOrderItemId = null;
+                item.orderedQuantity = null;
+                item.servedQuantity = null;
+                input.value = lotLabel(b);
+                input.readOnly = true;
+                row.querySelector('.js-item-unit').value = item.unit;
+                // Lot/Expiry stay editable even once a lot is picked - a receiving/issuing
+                // clerk may legitimately need to correct or split them, unlike Catalog/Unit
+                // which only ever come from a real pick.
+                row.querySelector('.js-item-lot').value = item.lot;
+                row.querySelector('.js-item-expiry').value = item.expiryDate;
+                updateMaxHint(row, item);
+                updatePoRefDisplay(row, item);
+                panel.classList.add('hidden');
+                syncItems();
+            }
+
+            function selectProduct(inv) {
                 item.itemId = inv.id;
                 item.catalogCode = inv.catalog;
                 item.description = inv.description || '';
@@ -573,11 +771,21 @@
                 item.packSize = inv.packSize || null;
                 item.purchaseUnit = inv.purchaseUnit || '';
                 item.unitMode = 'base';
+                item.purchaseOrderItemId = null;
                 input.value = label(inv);
+                input.readOnly = true;
                 row.querySelector('.js-item-unit').value = item.unit;
                 updatePackToggle(row, item);
                 panel.classList.add('hidden');
                 syncItems();
+            }
+
+            panel.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-idx]');
+                if (!btn || !panel._matches) return;
+                var picked = panel._matches[parseInt(btn.getAttribute('data-idx'), 10)];
+                if (!picked) return;
+                if (isStockOut()) selectLot(picked); else selectProduct(picked);
             });
 
             input.addEventListener('input', function () {
@@ -589,7 +797,23 @@
                 item.purchaseUnit = '';
                 item.baseUnit = '';
                 item.unitMode = 'base';
+                item.purchaseOrderItemId = null;
+                item.orderedQuantity = null;
+                item.servedQuantity = null;
+                if (isStockOut()) {
+                    item.lot = '';
+                    item.expiryDate = '';
+                    item.maxOnHand = null;
+                    var lotInput = row.querySelector('.js-item-lot');
+                    lotInput.value = '';
+                    lotInput.readOnly = false;
+                    var expiryInput = row.querySelector('.js-item-expiry');
+                    expiryInput.value = '';
+                    expiryInput.readOnly = false;
+                    updateMaxHint(row, item);
+                }
                 updatePackToggle(row, item);
+                updatePoRefDisplay(row, item);
                 render(input.value);
                 panel.classList.remove('hidden');
                 syncItems();
@@ -598,7 +822,11 @@
             input.addEventListener('click', function (e) {
                 e.stopPropagation();
                 closeAllOtherDropdowns(panel);
-                render(input.value);
+                // Once locked (a real pick has been made), input.value holds the full
+                // label rather than a search term - show the full unfiltered list instead
+                // of filtering by that label text, so re-picking doesn't require clearing
+                // the field by hand first.
+                render(input.readOnly ? '' : input.value);
                 panel.classList.remove('hidden');
             });
         }
@@ -614,7 +842,11 @@
                 radio.name = 'unitMode-' + item.uid;
             });
             itemsList.appendChild(frag);
-            initItemCatalogPicker(rowFor(item.uid), item);
+            var liveRow = rowFor(item.uid);
+            initItemCatalogPicker(liveRow, item);
+            liveRow.querySelector('.js-item-catalog-search').placeholder = isStockOut()
+                ? 'Search an on-hand lot…'
+                : 'Search catalog # or item name, or type your own…';
             OS.refreshIcons();
         }
 
@@ -624,6 +856,7 @@
                     itemId: it.itemId, catalogCode: it.catalogCode, description: it.description,
                     unit: it.unit, category: it.category, quantity: it.quantity,
                     lot: it.lot, expiryDate: it.expiryDate, unitMode: it.unitMode,
+                    purchaseOrderItemId: it.purchaseOrderItemId,
                 };
             }));
         }
@@ -664,6 +897,7 @@
                 var item = makeItem();
                 if (data) {
                     item.itemId = data.itemId || null;
+                    item.purchaseOrderItemId = data.purchaseOrderItemId || null;
                     item.catalogCode = data.catalogCode || '';
                     item.description = data.description || '';
                     item.unit = data.unit || '';
@@ -686,9 +920,9 @@
                 items.push(item);
                 appendItemRow(item);
                 var row = rowFor(item.uid);
-                row.querySelector('.js-item-catalog-search').value = item.catalogCode
-                    ? item.catalogCode + ' — ' + item.description
-                    : item.description;
+                var catalogInput = row.querySelector('.js-item-catalog-search');
+                catalogInput.value = item.catalogCode ? item.catalogCode + ' — ' + item.description : item.description;
+                catalogInput.readOnly = !!item.catalogCode;
                 row.querySelector('.js-item-unit').value = item.unit;
                 row.querySelector('.js-item-quantity').value = item.quantity;
                 row.querySelector('.js-item-lot').value = item.lot;
@@ -698,6 +932,89 @@
             Pickers.renumberItems(itemsList);
             syncItems();
         }
+
+        // Replaces the item list with this PO's own outstanding lines (ordered minus
+        // already-served), each tagged with purchaseOrderItemId so the server can
+        // increment that exact PO line's quantityServed once this receipt is Verified
+        // (warehouse_transactions_repo.verify()). Unlike loadItems() (used for Edit), this
+        // always starts from a clean list - a PO's outstanding items, not an existing
+        // transaction's own saved items.
+        function loadPoItems(list) {
+            items = [];
+            itemsList.innerHTML = '';
+            if (!list.length) { addItem(); return; }
+            list.forEach(function (data) {
+                var item = makeItem();
+                item.itemId = data.itemId || null;
+                item.catalogCode = data.catalogCode || '';
+                item.description = data.description || '';
+                item.unit = data.unit || '';
+                item.quantity = String(data.outstandingQuantity);
+                item.purchaseOrderItemId = data.purchaseOrderItemId;
+                item.orderedQuantity = data.orderedQuantity;
+                item.servedQuantity = data.alreadyServedQuantity;
+                var inv = item.itemId ? INVENTORY_ITEMS.find(function (i) { return i.id === item.itemId; }) : null;
+                item.category = inv ? inv.category : '';
+                item.packSize = inv ? inv.packSize : null;
+                item.purchaseUnit = inv ? inv.purchaseUnit : '';
+                item.baseUnit = inv ? (inv.baseUnit || inv.purchaseUnit || inv.salesUnit || '') : '';
+                items.push(item);
+                appendItemRow(item);
+                var row = rowFor(item.uid);
+                var catalogInput = row.querySelector('.js-item-catalog-search');
+                catalogInput.value = item.catalogCode ? item.catalogCode + ' — ' + item.description : item.description;
+                catalogInput.readOnly = !!item.catalogCode;
+                row.querySelector('.js-item-unit').value = item.unit;
+                row.querySelector('.js-item-quantity').value = item.quantity;
+                updatePackToggle(row, item);
+                updatePoRefDisplay(row, item);
+            });
+            Pickers.renumberItems(itemsList);
+            syncItems();
+        }
+
+        var loadPoItemsBtn = document.getElementById('loadPoItemsBtn');
+        fieldPurchaseOrderId.addEventListener('change', function () {
+            loadPoItemsWrap.classList.toggle('hidden', !fieldPurchaseOrderId.value);
+        });
+        var loadPoItemsSuccess = document.getElementById('loadPoItemsSuccess');
+        var loadPoItemsIdleHtml = loadPoItemsBtn.innerHTML;
+        var loadPoItemsBusyHtml = '<i data-lucide="loader-2" class="h-4 w-4 animate-spin"></i>Loading…';
+        var loadPoItemsSuccessTimer = null;
+
+        loadPoItemsBtn.addEventListener('click', function () {
+            var poId = fieldPurchaseOrderId.value;
+            if (!poId) return;
+            loadPoItemsBtn.disabled = true;
+            loadPoItemsBtn.innerHTML = loadPoItemsBusyHtml;
+            loadPoItemsSuccess.classList.add('hidden');
+            loadPoItemsSuccess.classList.remove('flex');
+            OS.refreshIcons();
+            fetch('/page/warehouse_transactions/po-items?purchaseOrderId=' + encodeURIComponent(poId))
+                .then(function (r) { return r.json(); })
+                .then(function (list) {
+                    loadPoItems(list);
+                    clearTimeout(loadPoItemsSuccessTimer);
+                    loadPoItemsSuccess.classList.remove('hidden');
+                    loadPoItemsSuccess.classList.add('flex');
+                    loadPoItemsSuccessTimer = setTimeout(function () {
+                        loadPoItemsSuccess.classList.add('hidden');
+                        loadPoItemsSuccess.classList.remove('flex');
+                    }, 3000);
+                })
+                .finally(function () {
+                    loadPoItemsBtn.disabled = false;
+                    loadPoItemsBtn.innerHTML = loadPoItemsIdleHtml;
+                    OS.refreshIcons();
+                });
+        });
+
+        // Changing Branch while in Stock Out mode invalidates any already-picked lots (a
+        // lot on hand at one branch isn't on hand at another) - reset back to one blank row
+        // rather than leave stale selections referencing the wrong branch's stock.
+        document.getElementById('fieldBranch').addEventListener('change', function () {
+            if (isStockOut()) resetItems();
+        });
 
         itemsList.addEventListener('click', function (e) {
             var btn = e.target.closest('[data-action]');
@@ -757,6 +1074,11 @@
                 if (!(parseInt(it.quantity, 10) > 0)) {
                     e.preventDefault(); alert('Line item ' + n + ' needs a quantity.'); return;
                 }
+                if (it.maxOnHand != null && parseInt(it.quantity, 10) > it.maxOnHand) {
+                    e.preventDefault();
+                    alert('Line item ' + n + ': only ' + it.maxOnHand + ' on hand, cannot stock out ' + it.quantity + '.');
+                    return;
+                }
             }
         });
 
@@ -779,38 +1101,52 @@
             recordForm.action = addUrl;
             recordModalTitle.textContent = 'Add Transaction';
             recordSubmitBtn.innerHTML = '<i data-lucide="send" class="h-4 w-4"></i>Record Transaction';
-            applyDirection('in');
-            poPicker.reset();
+            applyStockType('stock_in_manual', { skipReset: true });
+            setupBranchField();
+            document.getElementById('fieldCareTo').value = CURRENT_USER_NAME;
             resetItems();
             OS.refreshIcons();
             OS.openModal('recordModal');
         });
+
+        function stockTypeFor(direction, reason) {
+            if (direction === 'IN') return reason === 'Purchase Order' ? 'stock_in_po' : 'stock_in_manual';
+            return reason === 'Return to Supplier' ? 'stock_out_return' : 'stock_out_manual';
+        }
 
         function openEdit(row) {
             recordForm.action = editUrl(row.getAttribute('data-id'));
             recordModalTitle.textContent = 'Edit Transaction';
             recordSubmitBtn.innerHTML = '<i data-lucide="check" class="h-4 w-4"></i>Save Changes';
 
-            var direction = row.getAttribute('data-direction') === 'IN' ? 'in' : 'out';
-            applyDirection(direction);
+            var direction = row.getAttribute('data-direction');
+            var reason = row.getAttribute('data-reason');
+            var stockType = stockTypeFor(direction, reason);
+            applyStockType(stockType, { skipReset: true });
 
             var poId = row.getAttribute('data-purchase-order-id');
-            if (poId) {
-                var po = APPROVED_POS.find(function (p) { return String(p.id) === poId; });
+            if (stockType === 'stock_in_po' && poId) {
+                var po = RECEIVABLE_POS.find(function (p) { return String(p.id) === poId; });
                 document.getElementById('poSearchInput').value = po
                     ? (po.poNumber + ' — ' + (po.supplierName || ''))
                     : ('PO ' + row.getAttribute('data-po-number'));
                 document.getElementById('fieldPurchaseOrderId').value = poId;
-            } else {
-                poPicker.reset();
+                loadPoItemsWrap.classList.remove('hidden');
+            } else if (stockType === 'stock_out_return' && poId) {
+                var refPo = REFERENCE_POS.find(function (p) { return String(p.id) === poId; });
+                document.getElementById('returnPoSearchInput').value = refPo
+                    ? (refPo.poNumber + ' — ' + (refPo.supplierName || ''))
+                    : ('PO ' + row.getAttribute('data-po-number'));
+                document.getElementById('fieldReturnPurchaseOrderId').value = poId;
             }
+
             document.getElementById('fieldSupplierInvoice').value = row.getAttribute('data-supplier-invoice') || '';
-            document.getElementById('fieldSiNumber').value = row.getAttribute('data-si-number') || '';
-            document.getElementById('fieldDrNumber').value = row.getAttribute('data-dr-number') || '';
-            document.getElementById('fieldCustomerPo').value = row.getAttribute('data-customer-po') || '';
-            document.getElementById('fieldSupplierDrNumber').value = row.getAttribute('data-supplier-dr-number') || '';
+            document.getElementById('fieldDrNumberIn').value = row.getAttribute('data-dr-number') || '';
+            document.getElementById('fieldInvoiceAmount').value = row.getAttribute('data-invoice-amount') || '';
+            document.getElementById('fieldReturnSupplierInvoice').value = row.getAttribute('data-supplier-invoice') || '';
+            document.getElementById('fieldDrNumberReturn').value = row.getAttribute('data-dr-number') || '';
             document.getElementById('fieldCareTo').value = row.getAttribute('data-care-to') || '';
-            document.getElementById('fieldBranch').value = row.getAttribute('data-branch') || '';
+            setupBranchField(row.getAttribute('data-branch'));
             document.getElementById('fieldNote').value = row.getAttribute('data-note') || '';
 
             var txnItems = [];
@@ -861,17 +1197,24 @@
         }
 
         function openView(row) {
-            document.getElementById('viewDirection').textContent = row.getAttribute('data-direction') === 'IN' ? 'Stock In' : 'Stock Out';
+            var direction = row.getAttribute('data-direction');
+            var reason = row.getAttribute('data-reason');
+            var typeLabel = direction === 'IN'
+                ? (reason === 'Purchase Order' ? 'Stock In — Purchase Order' : 'Stock In — Manual')
+                : (reason === 'Return to Supplier' ? 'Stock Out — Return to Supplier' : 'Stock Out — Manual');
+            document.getElementById('viewDirection').textContent = typeLabel;
             document.getElementById('viewStatus').textContent = row.getAttribute('data-status') || '—';
             var createdAt = row.getAttribute('data-created-at');
             document.getElementById('viewCreatedAt').textContent = createdAt ? createdAt.slice(0, 10) : '—';
             document.getElementById('viewBranch').textContent = row.getAttribute('data-branch') || '—';
             document.getElementById('viewCareTo').textContent = row.getAttribute('data-care-to') || '—';
 
-            var reference = row.getAttribute('data-po-number') ? 'PO ' + row.getAttribute('data-po-number')
+            var reference = reason === 'Return to Supplier'
+                ? ('Return' + (row.getAttribute('data-po-number') ? ' (PO ' + row.getAttribute('data-po-number') + ')' : ''))
+                : row.getAttribute('data-po-number') ? 'PO ' + row.getAttribute('data-po-number')
                 : row.getAttribute('data-si-number') ? 'SI ' + row.getAttribute('data-si-number')
                 : row.getAttribute('data-dr-number') ? 'DR ' + row.getAttribute('data-dr-number')
-                : row.getAttribute('data-reason') || '—';
+                : reason || '—';
             document.getElementById('viewReference').textContent = reference;
 
             document.getElementById('viewCreatedBy').textContent = row.getAttribute('data-created-by-name') || '—';
@@ -917,6 +1260,8 @@
         searchInput.addEventListener('search', function () {
             if (searchInput.value === '') document.getElementById('searchForm').submit();
         });
+
+        applyStockType('stock_in_manual', { skipReset: true });
     })();
 </script>
 {% endblock %}

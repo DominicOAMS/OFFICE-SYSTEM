@@ -131,28 +131,23 @@
                 </button>
 
                 <!-- Notifications -->
-                <div class="relative" data-dropdown>
+                <div class="relative" data-dropdown id="notificationsDropdown">
                     <button type="button" data-dropdown-toggle aria-expanded="false"
                             class="relative rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900
                                    dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
                             aria-label="Notifications">
                         <i data-lucide="bell" class="h-[18px] w-[18px]"></i>
-                        <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-accent-500 ring-2 ring-white dark:ring-slate-900"></span>
+                        <span id="notificationBadge" hidden
+                              class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-accent-500 ring-2 ring-white dark:ring-slate-900"></span>
                     </button>
-                    <div data-dropdown-panel
+                    <div data-dropdown-panel id="notificationsPanel"
                          class="hidden absolute right-0 mt-2 w-72 origin-top-right overflow-hidden rounded-xl border
                                 border-slate-200 bg-white shadow-lg shadow-slate-900/5 dark:border-slate-700 dark:bg-slate-800">
                         <p class="border-b border-slate-100 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide
                                   text-slate-500 dark:border-slate-700 dark:text-slate-400">Notifications</p>
-                        <a href="#" class="flex gap-3 px-4 py-3 transition hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                            <span class="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
-                                <i data-lucide="triangle-alert" class="h-4 w-4"></i>
-                            </span>
-                            <span class="min-w-0">
-                                <span class="block text-sm font-medium text-slate-800 dark:text-slate-100">System Notification</span>
-                                <span class="block text-xs text-slate-500 dark:text-slate-400">Near-expiry / expired products</span>
-                            </span>
-                        </a>
+                        <div id="notificationsList" class="max-h-80 overflow-y-auto">
+                            <p class="px-4 py-6 text-center text-sm text-slate-400 dark:text-slate-500">Loading…</p>
+                        </div>
                     </div>
                 </div>
 
@@ -229,6 +224,7 @@
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     <script src="{{ url_for('static', filename='js/password_toggle.js') }}"></script>
     <script src="{{ url_for('static', filename='js/pickers.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 

@@ -88,7 +88,7 @@ def list_unclaimed_verified_for_supplier(supplier_id):
                   JOIN tbl_check_vouchers cv ON cv.id = cvp.voucherId
                   WHERE cv.status != 'Void'
               )
-            ORDER BY ap.id ASC
+            ORDER BY ap.id DESC
             """,
             (supplier_id,),
         )

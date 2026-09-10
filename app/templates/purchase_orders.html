@@ -5,10 +5,14 @@
 
 {% block content %}
 {% set STATUS_TONE = {
-    'Draft': 'badge-slate',
     'Pending Approval': 'badge-warning',
     'Approved': 'badge-success',
-    'Rejected': 'badge-accent'
+    'Rejected': 'badge-accent',
+    'Printed': 'badge-brand',
+    'For Verification': 'badge-warning',
+    'Partially Delivered': 'badge-brand',
+    'Delivered': 'badge-success',
+    'Paid': 'badge-success'
 } %}
 <div class="px-4 py-6 sm:px-6">
 
@@ -56,7 +60,12 @@
                 ('', 'All'),
                 ('Pending Approval', 'Pending Approval'),
                 ('Approved', 'Approved'),
-                ('Rejected', 'Rejected')
+                ('Rejected', 'Rejected'),
+                ('Printed', 'Printed'),
+                ('For Verification', 'For Verification'),
+                ('Partially Delivered', 'Partially Delivered'),
+                ('Delivered', 'Delivered'),
+                ('Paid', 'Paid')
             ] %}
             <a href="{{ url_for('main.purchase_orders', q=search or None, status=value or None) }}"
                class="badge {{ 'bg-accent-600 text-white ring-0' if status == value else 'badge-slate' }}">
@@ -84,6 +93,7 @@
                         data-id="{{ po.id }}"
                         data-po-number="{{ po.poNumber }}"
                         data-order-date="{{ po.orderDate or '' }}"
+                        data-supplier-id="{{ po.supplierId or '' }}"
                         data-supplier-name="{{ po.supplierName or '—' }}"
                         data-supplier-address="{{ po.supplierAddress or '' }}"
                         data-delivery-address="{{ po.deliveryAddress or '' }}"
@@ -100,8 +110,8 @@
                         data-vat-amount="{{ po.vatAmount or '' }}"
                         data-total-amount="{{ po.totalAmount or '' }}"
                         data-status="{{ po.status }}"
+                        data-editable="{{ 'true' if po.status == 'Pending Approval' and session.get('user_id') == po.createdBy else 'false' }}"
                         data-created-by-name="{{ po.createdByName or '' }}"
-                        data-approver-name="{{ po.approverName or '' }}"
                         data-approver-remarks="{{ po.approverRemarks or '' }}"
                         data-attachment-url="{{ url_for('main.purchase_order_attachment', po_id=po.id) if po.attachmentPath else '' }}"
                         {# single-quoted: Flask's tojson escapes < > & ' but NOT ", and JSON
@@ -131,6 +141,24 @@
                                 <button type="button" class="btn btn-icon text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 js-reject"
                                         data-url="{{ url_for('main.purchase_order_reject', po_id=po.id) }}" title="Reject">
                                     <i data-lucide="x" class="h-4 w-4"></i>
+                                </button>
+                                {% endif %}
+                                {% if po.status == 'Approved' %}
+                                <button type="button" class="btn btn-icon text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 js-print"
+                                        data-url="{{ url_for('main.purchase_order_print', po_id=po.id) }}"
+                                        data-print-url="{{ url_for('main.purchase_order_print_view', po_id=po.id) }}" title="Print">
+                                    <i data-lucide="printer" class="h-4 w-4"></i>
+                                </button>
+                                {% elif po.status not in ('Pending Approval', 'Rejected') %}
+                                <a class="btn btn-icon btn-ghost" href="{{ url_for('main.purchase_order_print_view', po_id=po.id) }}"
+                                   target="_blank" rel="noopener" title="Reprint">
+                                    <i data-lucide="printer" class="h-4 w-4"></i>
+                                </a>
+                                {% endif %}
+                                {% if po.status == 'For Verification' %}
+                                <button type="button" class="btn btn-icon text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 js-verify-delivery"
+                                        data-url="{{ url_for('main.purchase_order_verify_delivery', po_id=po.id) }}" title="Verify Delivery">
+                                    <i data-lucide="clipboard-check" class="h-4 w-4"></i>
                                 </button>
                                 {% endif %}
                                 {% if session.get('user_id') == po.createdBy %}
@@ -168,13 +196,18 @@
     <div class="modal-panel max-w-6xl">
         <form id="recordForm" method="POST" action="{{ url_for('main.purchase_order_add') }}">
             <div class="modal-header">
-                <h3 class="modal-title">Add Purchase Order</h3>
+                <h3 class="modal-title" id="recordModalTitle">Add Purchase Order</h3>
                 <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
                     <i data-lucide="x" class="h-4 w-4"></i>
                 </button>
             </div>
 
             <div class="modal-body space-y-5">
+
+                <div id="poNumberPreviewWrap" class="hidden rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-700 dark:bg-brand-500/10 dark:text-brand-400">
+                    Next PO #: <span id="poNumberPreview" class="font-mono font-semibold"></span>
+                    <span class="text-xs font-normal text-brand-600/70 dark:text-brand-400/70">(not reserved until you submit — a concurrent PO may take this number first)</span>
+                </div>
 
                 <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
                     <div class="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
@@ -307,7 +340,7 @@
 
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-modal-close>Cancel</button>
-                <button type="submit" class="btn btn-primary">
+                <button type="submit" class="btn btn-primary" id="recordSubmitBtn">
                     <i data-lucide="send" class="h-4 w-4"></i>Submit Purchase Order
                 </button>
             </div>
@@ -384,30 +417,51 @@
 
 <!-- ===================== View detail modal ===================== -->
 <div id="viewModal" data-modal class="modal-backdrop hidden">
-    <div class="modal-panel max-w-lg">
+    <div class="modal-panel max-w-3xl">
         <div class="modal-header">
             <h3 class="modal-title">Purchase Order Details</h3>
             <button type="button" data-modal-close class="btn btn-icon btn-ghost" aria-label="Close">
                 <i data-lucide="x" class="h-4 w-4"></i>
             </button>
         </div>
-        <div class="modal-body space-y-3 text-sm">
+        <div class="modal-body space-y-4 text-sm">
             <div class="grid grid-cols-2 gap-3">
                 <div><p class="help mb-0.5">PO Number</p><p id="viewPoNumber" class="font-medium text-slate-900 dark:text-white"></p></div>
                 <div><p class="help mb-0.5">Status</p><p id="viewStatus" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Supplier</p><p id="viewSupplier" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Branch</p><p id="viewBranch" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Order Date</p><p id="viewOrderDate" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Price Code</p><p id="viewPriceCode" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Delivery Address</p><p id="viewDeliveryAddress" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Delivery Telephone</p><p id="viewDeliveryTelephone" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Delivery Mobile</p><p id="viewDeliveryMobileNumber" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Delivery Term</p><p id="viewDeliveryTerm" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Payment Term</p><p id="viewPaymentTerm" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Delivery Date</p><p id="viewDeliveryDate" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Payment Due</p><p id="viewPaymentDueDate" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div><p class="help mb-0.5">Created By</p><p id="viewCreatedBy" class="text-slate-700 dark:text-slate-300"></p></div>
             </div>
+
+            <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div class="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                    <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Supplier</p>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><p class="help mb-0.5">Supplier</p><p id="viewSupplier" class="text-slate-700 dark:text-slate-300"></p></div>
+                        <div><p class="help mb-0.5">Price Code</p><p id="viewPriceCode" class="text-slate-700 dark:text-slate-300"></p></div>
+                    </div>
+                </div>
+
+                <div class="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                    <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Delivery Information</p>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><p class="help mb-0.5">Branch</p><p id="viewBranch" class="text-slate-700 dark:text-slate-300"></p></div>
+                        <div><p class="help mb-0.5">Delivery Address</p><p id="viewDeliveryAddress" class="text-slate-700 dark:text-slate-300"></p></div>
+                        <div><p class="help mb-0.5">Delivery Telephone</p><p id="viewDeliveryTelephone" class="text-slate-700 dark:text-slate-300"></p></div>
+                        <div><p class="help mb-0.5">Delivery Mobile</p><p id="viewDeliveryMobileNumber" class="text-slate-700 dark:text-slate-300"></p></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Order Terms</p>
+                <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <div><p class="help mb-0.5">Order Date</p><p id="viewOrderDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                    <div><p class="help mb-0.5">Delivery Term</p><p id="viewDeliveryTerm" class="text-slate-700 dark:text-slate-300"></p></div>
+                    <div><p class="help mb-0.5">Payment Term</p><p id="viewPaymentTerm" class="text-slate-700 dark:text-slate-300"></p></div>
+                    <div><p class="help mb-0.5">Delivery Date</p><p id="viewDeliveryDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                    <div><p class="help mb-0.5">Payment Due</p><p id="viewPaymentDueDate" class="text-slate-700 dark:text-slate-300"></p></div>
+                    <div><p class="help mb-0.5">Created By</p><p id="viewCreatedBy" class="text-slate-700 dark:text-slate-300"></p></div>
+                </div>
+            </div>
+
             <div>
                 <p class="help mb-1">Line Items</p>
                 <div id="viewItems" class="space-y-2"></div>
@@ -424,12 +478,17 @@
                     <img id="viewAttachmentImg" class="h-40 w-40 rounded-lg border border-slate-200 object-cover dark:border-slate-700" alt="Attachment">
                 </a>
             </div>
-            <div class="border-t border-slate-200 pt-3 dark:border-slate-800">
-                <div><p class="help mb-0.5">Approver</p><p id="viewApprover" class="text-slate-700 dark:text-slate-300"></p></div>
-                <div id="viewApproverRemarksWrap" class="hidden mt-1"><p class="help mb-0.5">Approver Remarks</p><p id="viewApproverRemarks" class="text-slate-700 dark:text-slate-300"></p></div>
+            <div id="viewApproverRemarksWrap" class="hidden border-t border-slate-200 pt-3 dark:border-slate-800">
+                <p class="help mb-0.5">Remarks</p><p id="viewApproverRemarks" class="text-slate-700 dark:text-slate-300"></p>
             </div>
         </div>
         <div class="modal-footer">
+            <button type="button" class="btn btn-danger hidden" id="viewRejectBtn">
+                <i data-lucide="x" class="h-4 w-4"></i>Reject
+            </button>
+            <button type="button" class="btn btn-primary hidden" id="viewApproveBtn">
+                <i data-lucide="check" class="h-4 w-4"></i>Approve
+            </button>
             <button type="button" class="btn btn-secondary" data-modal-close>Close</button>
         </div>
     </div>
@@ -498,6 +557,7 @@
         var CUSTOMERS = {{ customers|tojson }};
         var SUPPLIER_PRICE_CODES = {{ supplier_price_codes|tojson }};
         var USER_BRANCH = {{ (session.get('user_branch') or '')|tojson }};
+        var IS_PO_APPROVER = {{ is_po_approver|tojson }};
 
         // Requirement 2: legacy hardcodes these same Calamba values into every
         // PO regardless of branch (purchase_order.blade.php) and only varies
@@ -620,11 +680,18 @@
             fieldPriceCode.value = codes.length === 1 ? codes[0] : '';
         }
 
+        // Set while Edit is programmatically driving the supplier field, so picking the
+        // PO's own supplier doesn't clobber the price code Edit is about to set with
+        // whatever this supplier's OWN default-price-code logic would have picked instead.
+        var suppressPriceCodeDefault = false;
+
         document.getElementById('fieldSupplierId').addEventListener('change', function () {
             var supplier = this.value ? findSupplierById(this.value) : null;
             showSupplierDetails(supplier);
-            defaultPriceCodeForSupplier(this.value || null);
-            fieldPriceCode.dispatchEvent(new Event('change'));
+            if (!suppressPriceCodeDefault) {
+                defaultPriceCodeForSupplier(this.value || null);
+                fieldPriceCode.dispatchEvent(new Event('change'));
+            }
         });
 
         /* ------------------------------------------------- branch (requirement 3)
@@ -915,9 +982,20 @@
 
             function label(p) { return p.catalog + ' — ' + (p.description || ''); }
 
+            // A product already picked on ANOTHER line is dropped from the list, so the
+            // same catalog can't be encoded twice - this row's OWN current pick stays
+            // offered (matching on uid, not catalog) so re-opening this same row's search
+            // still shows it. Duplicate-detection is by catalog code alone, since two
+            // rows for the same product only differ in quantity/cost, never anything the
+            // picker itself would show separately.
+            function alreadyUsedElsewhere(catalog) {
+                return items.some(function (it) { return it.uid !== item.uid && it.catalogCode === catalog; });
+            }
+
             function render(filterText) {
                 var term = (filterText || '').trim().toLowerCase();
                 var matches = currentSupplierProducts.filter(function (p) {
+                    if (alreadyUsedElsewhere(p.catalog)) return false;
                     return !term
                         || p.catalog.toLowerCase().indexOf(term) !== -1
                         || (p.description || '').toLowerCase().indexOf(term) !== -1;
@@ -927,7 +1005,7 @@
                         return '<button type="button" class="block w-full truncate px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700/50" data-idx="' + idx + '">'
                             + escapeHtml(label(p)) + '</button>';
                     }).join('')
-                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matching priced product</p>';
+                    : '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No matching priced product (or every match is already on another line)</p>';
                 panel._matches = matches;
             }
 
@@ -1074,6 +1152,14 @@
         var itemsHelp = document.getElementById('itemsHelp');
         var addItemBtn = document.getElementById('addItemBtn');
 
+        // Set right before programmatically driving the supplier/price-code fields to open
+        // an existing PO for Edit - refreshSupplierProducts() normally resets the item list
+        // whenever it runs (a fresh Add, or the user actually changing price code), but Edit
+        // needs to instead repopulate the PO's own saved items once its priced-product list
+        // has loaded (the per-row catalog picker searches that list, so it must be ready
+        // first). Consumed and cleared by the very next refreshSupplierProducts() call.
+        var pendingItemsToLoad = null;
+
         function refreshSupplierProducts() {
             var supplierId = document.getElementById('fieldSupplierId').value;
             var priceCode = fieldPriceCode.value;
@@ -1082,6 +1168,7 @@
                 currentSupplierProducts = [];
                 addItemBtn.disabled = true;
                 itemsHelp.textContent = 'Choose a supplier and price code above to search its priced products — only products the supplier has priced under that code can be added.';
+                pendingItemsToLoad = null;
                 resetItems(false);
                 return;
             }
@@ -1096,17 +1183,80 @@
                     itemsHelp.textContent = products.length
                         ? ('Only this supplier’s products priced under "' + priceCode + '" can be added (' + products.length + ' available).')
                         : 'This supplier has no products priced under this price code yet.';
-                    resetItems(products.length > 0);
+                    if (pendingItemsToLoad) {
+                        var toLoad = pendingItemsToLoad;
+                        pendingItemsToLoad = null;
+                        loadItemsFromData(toLoad);
+                    } else {
+                        resetItems(products.length > 0);
+                    }
                 })
                 .catch(function () {
                     currentSupplierProducts = [];
                     addItemBtn.disabled = true;
                     itemsHelp.textContent = 'Could not load this supplier’s priced products.';
+                    pendingItemsToLoad = null;
                     resetItems(false);
                 });
         }
 
         fieldPriceCode.addEventListener('change', refreshSupplierProducts);
+
+        // Rebuilds the whole item list from an existing PO's saved line items (its
+        // data-items JSON, the same shape _item_for_view produces), for Edit - reuses
+        // makeItem()/appendItemRow() for uid-minting and picker wiring rather than
+        // duplicating them, then fills in the real values a freshly-added blank row
+        // never has. Every restored allocation is also wired to its own live picker
+        // via appendAllocationRow(), same as a freshly-added one.
+        function loadItemsFromData(poItems) {
+            items = [];
+            itemsList.innerHTML = '';
+            var source = poItems.length ? poItems : [null];
+            source.forEach(function (data) {
+                var item = makeItem();
+                if (data) {
+                    item.itemId = data.itemId || null;
+                    item.catalogCode = data.catalogCode || '';
+                    item.description = data.description || '';
+                    item.unit = data.unit || '';
+                    item.quantity = data.quantity != null ? String(data.quantity) : '';
+                    item.unitCost = data.unitCost != null ? String(data.unitCost) : '';
+                    item.allocations = (data.allocations || []).map(function (a) {
+                        allocUidCounter += 1;
+                        return {
+                            uid: 'a' + allocUidCounter,
+                            customerId: a.customerId || null,
+                            customerName: a.customerName || a.customerCode || '',
+                            quantity: a.quantity != null ? String(a.quantity) : '',
+                        };
+                    });
+                }
+                items.push(item);
+                appendItemRow(item);
+                var row = rowFor(item.uid);
+                row.querySelector('.js-item-catalog-search').value = item.catalogCode
+                    ? (item.catalogCode + ' — ' + item.description) : item.description;
+                var unitField = row.querySelector('.js-item-unit');
+                unitField.innerHTML = '';
+                if (item.unit) {
+                    var opt = document.createElement('option');
+                    opt.value = item.unit;
+                    opt.textContent = item.unit;
+                    unitField.appendChild(opt);
+                }
+                row.querySelector('.js-item-quantity').value = item.quantity;
+                row.querySelector('.js-item-unit-cost').value = item.unitCost;
+                item.allocations.forEach(function (alloc) {
+                    appendAllocationRow(item, alloc);
+                    var allocRow = allocationsList(row).querySelector('.js-allocation-row[data-alloc="' + alloc.uid + '"]');
+                    allocRow.querySelector('.js-alloc-customer-search').value = alloc.customerName;
+                    allocRow.querySelector('.js-alloc-quantity').value = alloc.quantity;
+                });
+                updateAllocationSummary(item);
+            });
+            Pickers.renumberItems(itemsList);
+            syncItems();
+        }
 
         itemsList.addEventListener('click', function (e) {
             var btn = e.target.closest('[data-action]');
@@ -1187,8 +1337,18 @@
         });
 
         /* ------------------------------------------------------------- add */
+        var recordModalTitle = document.getElementById('recordModalTitle');
+        var recordSubmitBtn = document.getElementById('recordSubmitBtn');
+        var poNumberPreviewWrap = document.getElementById('poNumberPreviewWrap');
+        var poNumberPreview = document.getElementById('poNumberPreview');
+        var addUrl = "{{ url_for('main.purchase_order_add') }}";
+        function editUrl(id) { return '/page/purchase_order_orders/' + id + '/edit'; }
+
         document.getElementById('addNewBtn').addEventListener('click', function () {
             recordForm.reset();
+            recordForm.action = addUrl;
+            recordModalTitle.textContent = 'Add Purchase Order';
+            recordSubmitBtn.innerHTML = '<i data-lucide="send" class="h-4 w-4"></i>Submit Purchase Order';
             // supplierPicker.reset() cascades (via the fieldSupplierId 'change' it
             // dispatches) into clearing the price code select and line items too -
             // see the fieldSupplierId listener and refreshSupplierProducts() above.
@@ -1197,8 +1357,69 @@
             applyBranchDeliveryDefaults();
             document.getElementById('fieldPoDate').value = todayIso();
             recomputeDeliveryDateFromTerm();
+
+            poNumberPreviewWrap.classList.remove('hidden');
+            poNumberPreview.textContent = '…';
+            fetch('{{ url_for("main.purchase_order_next_number") }}')
+                .then(function (r) { return r.json(); })
+                .then(function (data) { poNumberPreview.textContent = data.poNumber; })
+                .catch(function () { poNumberPreview.textContent = '—'; });
+
+            OS.refreshIcons();
             OS.openModal('recordModal');
         });
+
+        /* ------------------------------------------------------------- edit
+           Reuses the exact same form as Add (requirement: "add and edit forms must be the
+           same") - only the action URL, title, and starting values differ. Supplier +
+           price code are set programmatically first (via supplierPicker.setValue /
+           fieldPriceCode.value), which cascades into refreshSupplierProducts() fetching
+           that supplier's priced products; pendingItemsToLoad tells that fetch's callback
+           to repopulate the PO's own saved items once ready, instead of resetting to a
+           single blank row like a fresh Add would. */
+        function openEdit(row) {
+            recordForm.reset();
+            recordForm.action = editUrl(row.getAttribute('data-id'));
+            recordModalTitle.textContent = 'Edit Purchase Order';
+            recordSubmitBtn.innerHTML = '<i data-lucide="check" class="h-4 w-4"></i>Save Changes';
+            poNumberPreviewWrap.classList.add('hidden');
+
+            setupBranchField();
+            var branch = row.getAttribute('data-branch');
+            if (branch) {
+                document.getElementById('fieldBranch').value = branch;
+                document.getElementById('fieldBranchValue').value = branch;
+            }
+            applyBranchDeliveryDefaults();
+
+            document.getElementById('fieldPoDate').value = row.getAttribute('data-order-date') || '';
+            document.getElementById('fieldDeliveryTerm').value = row.getAttribute('data-delivery-term') || '';
+            document.getElementById('fieldDeliveryDate').value = row.getAttribute('data-delivery-date') || '';
+            document.getElementById('fieldPaymentTerm').value = row.getAttribute('data-payment-term') || '45 days';
+            recomputePaymentDueDate();
+            document.getElementById('fieldNotes').value = row.getAttribute('data-notes') || '';
+
+            var poItems = [];
+            try { poItems = JSON.parse(row.getAttribute('data-items') || '[]'); } catch (err) { poItems = []; }
+
+            var supplierId = row.getAttribute('data-supplier-id');
+            var supplier = supplierId ? findSupplierById(supplierId) : null;
+            if (supplier) {
+                suppressPriceCodeDefault = true;
+                supplierPicker.setValue(supplier.id, supplier.name);
+                suppressPriceCodeDefault = false;
+                fieldPriceCode.value = row.getAttribute('data-price-code') || '';
+                pendingItemsToLoad = poItems;
+                fieldPriceCode.dispatchEvent(new Event('change'));
+            } else {
+                supplierPicker.reset();
+                pendingItemsToLoad = null;
+                resetItems(false);
+            }
+
+            OS.refreshIcons();
+            OS.openModal('recordModal');
+        }
 
         /* --------------------------------------------------------- view/approve/reject/delete */
         var viewFields = {
@@ -1208,7 +1429,7 @@
             viewDeliveryMobileNumber: 'delivery-mobile-number',
             viewDeliveryTerm: 'delivery-term', viewPaymentTerm: 'payment-term',
             viewDeliveryDate: 'delivery-date', viewPaymentDueDate: 'payment-due-date',
-            viewCreatedBy: 'created-by-name', viewStatus: 'status', viewApprover: 'approver-name',
+            viewCreatedBy: 'created-by-name', viewStatus: 'status',
         };
 
         function renderViewItems(row) {
@@ -1273,6 +1494,24 @@
             document.getElementById('viewApproverRemarksWrap').classList.toggle('hidden', !approverRemarks);
             document.getElementById('viewApproverRemarks').textContent = approverRemarks || '';
 
+            // Lets an approver act right from this read-only view - the natural place to
+            // put it, since clicking a "PO awaiting approval" notification lands here
+            // rather than on the table row's own action buttons.
+            var poId = row.getAttribute('data-id');
+            var canApprove = IS_PO_APPROVER && row.getAttribute('data-status') === 'Pending Approval';
+            var viewApproveBtn = document.getElementById('viewApproveBtn');
+            var viewRejectBtn = document.getElementById('viewRejectBtn');
+            viewApproveBtn.classList.toggle('hidden', !canApprove);
+            viewRejectBtn.classList.toggle('hidden', !canApprove);
+            viewApproveBtn.onclick = canApprove ? function () {
+                OS.closeModal('viewModal');
+                openAction('/page/purchase_order_orders/' + poId + '/approve', false);
+            } : null;
+            viewRejectBtn.onclick = canApprove ? function () {
+                OS.closeModal('viewModal');
+                openAction('/page/purchase_order_orders/' + poId + '/reject', true);
+            } : null;
+
             OS.openModal('viewModal');
         }
 
@@ -1299,10 +1538,40 @@
             var approveBtn = e.target.closest('.js-approve');
             var rejectBtn = e.target.closest('.js-reject');
             var delBtn = e.target.closest('.js-delete');
+            var printBtn = e.target.closest('.js-print');
+            var verifyDeliveryBtn = e.target.closest('.js-verify-delivery');
 
-            if (viewBtn) openView(viewBtn.closest('tr'));
+            if (viewBtn) {
+                var row = viewBtn.closest('tr');
+                // Requirement: while status is not yet Approved, View and Edit are the
+                // same form - past that point (or for someone other than the requester)
+                // it stays the plain read-only detail modal.
+                if (row.getAttribute('data-editable') === 'true') openEdit(row);
+                else openView(row);
+            }
             if (approveBtn) openAction(approveBtn.getAttribute('data-url'), false);
             if (rejectBtn) openAction(rejectBtn.getAttribute('data-url'), true);
+            if (printBtn) {
+                // Confirm FIRST, before anything else - window.open()'ing the printable
+                // document switches focus to the new tab, and a confirm() fired only
+                // afterward sits unanswered on the now-backgrounded original tab (some
+                // browsers block/delay dialogs on background tabs entirely), so the status
+                // change silently never happened. Confirming up front, then opening the
+                // print tab, then submitting, keeps the whole sequence on this tab first.
+                if (!confirm('Mark this Purchase Order as Printed?')) return;
+                window.open(printBtn.getAttribute('data-print-url'), '_blank');
+                var printForm = document.createElement('form');
+                printForm.method = 'POST';
+                printForm.action = printBtn.getAttribute('data-url');
+                document.body.appendChild(printForm);
+                printForm.submit();
+            }
+            if (verifyDeliveryBtn) {
+                Pickers.confirmAndSubmit(
+                    verifyDeliveryBtn.getAttribute('data-url'),
+                    'Verify delivery against the quantities received? This sets the PO to Delivered or Partially Delivered.'
+                );
+            }
             if (delBtn) {
                 deleteForm.action = '/page/purchase_order_orders/' + delBtn.closest('tr').getAttribute('data-id') + '/delete';
                 OS.openModal('deleteConfirmModal');
@@ -1314,6 +1583,22 @@
         searchInput.addEventListener('search', function () {
             if (searchInput.value === '') document.getElementById('searchForm').submit();
         });
+
+        /* ----------------------------------------------- notification deep-link
+           A notification's url points back here with ?highlight=<poId> - open that PO's
+           modal on load (View if read-only, or the same Edit-capable form otherwise), same
+           branching js-view uses. Only ever matches a PO on the CURRENT page/filter; if the
+           row isn't rendered here (different page/status filter) this silently does
+           nothing rather than guessing at a redirect. */
+        (function () {
+            var params = new URLSearchParams(window.location.search);
+            var highlightId = params.get('highlight');
+            if (!highlightId) return;
+            var row = tbody.querySelector('tr[data-id="' + highlightId + '"]');
+            if (!row) return;
+            if (row.getAttribute('data-editable') === 'true') openEdit(row);
+            else openView(row);
+        })();
     })();
 </script>
 {% endblock %}

@@ -1,3 +1,4 @@
+from . import purchase_orders_repo
 from .db import get_connection, get_cursor
 
 _TXN_COLUMNS = """
@@ -86,12 +87,12 @@ def insert_transaction(cur, data, created_by):
         INSERT INTO tbl_warehouse_transactions
             (direction, reason, careTo, note, status,
              purchaseOrderId, poNumber, invoiceId, siNumber, customerPo, supplierInvoice,
-             drNumber, supplierDrNumber, branch,
+             invoiceAmount, drNumber, supplierDrNumber, branch,
              isDeleted, createdBy, createdAt, updatedBy, updatedAt)
         VALUES
             (%s, %s, %s, %s, 'Created',
              %s, %s, %s, %s, %s, %s,
-             %s, %s, %s,
+             %s, %s, %s, %s,
              0, %s, NOW(), %s, NOW())
         """,
         (
@@ -105,6 +106,7 @@ def insert_transaction(cur, data, created_by):
             data["siNumber"],
             data["customerPo"],
             data["supplierInvoice"],
+            data.get("invoiceAmount"),
             data["drNumber"],
             data["supplierDrNumber"],
             data["branch"],
@@ -118,14 +120,15 @@ def insert_transaction(cur, data, created_by):
         cur.execute(
             """
             INSERT INTO tbl_warehouse_transaction_items
-                (transactionId, sequence, itemId, catalogCode, description, unit,
-                 category, quantity, enteredQuantity, enteredPackSize, lot, expiryDate)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (transactionId, sequence, itemId, purchaseOrderItemId, catalogCode, description,
+                 unit, category, quantity, enteredQuantity, enteredPackSize, lot, expiryDate)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 transaction_id,
                 seq,
                 item["itemId"],
+                item.get("purchaseOrderItemId"),
                 item["catalogCode"],
                 item["description"],
                 item["unit"],
@@ -150,14 +153,15 @@ def replace_transaction_items(cur, txn_id, items):
         cur.execute(
             """
             INSERT INTO tbl_warehouse_transaction_items
-                (transactionId, sequence, itemId, catalogCode, description, unit,
-                 category, quantity, enteredQuantity, enteredPackSize, lot, expiryDate)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (transactionId, sequence, itemId, purchaseOrderItemId, catalogCode, description,
+                 unit, category, quantity, enteredQuantity, enteredPackSize, lot, expiryDate)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 txn_id,
                 seq,
                 item["itemId"],
+                item.get("purchaseOrderItemId"),
                 item["catalogCode"],
                 item["description"],
                 item["unit"],
@@ -219,7 +223,8 @@ def update_transaction(txn_id, data, updated_by):
                 UPDATE tbl_warehouse_transactions
                 SET direction = %s, reason = %s, careTo = %s, note = %s,
                     purchaseOrderId = %s, poNumber = %s, siNumber = %s, customerPo = %s,
-                    supplierInvoice = %s, drNumber = %s, supplierDrNumber = %s, branch = %s,
+                    supplierInvoice = %s, invoiceAmount = %s, drNumber = %s,
+                    supplierDrNumber = %s, branch = %s,
                     updatedBy = %s, updatedAt = NOW()
                 WHERE id = %s
                 """,
@@ -233,6 +238,7 @@ def update_transaction(txn_id, data, updated_by):
                     data["siNumber"],
                     data["customerPo"],
                     data["supplierInvoice"],
+                    data.get("invoiceAmount"),
                     data["drNumber"],
                     data["supplierDrNumber"],
                     data["branch"],
@@ -359,16 +365,61 @@ def void(txn_id, voided_by, reason):
 
 
 def verify(txn_id, verified_by):
-    with get_cursor() as cur:
-        cur.execute(
-            """
-            UPDATE tbl_warehouse_transactions
-            SET status = 'Verified', verifiedBy = %s, verifiedAt = NOW(),
-                updatedBy = %s, updatedAt = NOW()
-            WHERE id = %s
-            """,
-            (verified_by, verified_by, txn_id),
-        )
+    """Confirming a Stock-In that's linked to a specific PO's line items also feeds those
+    receipts back into the PO: each line's quantityServed is incremented by what this
+    transaction recorded against it, and the PO moves to 'For Verification' so AP can decide
+    Delivered vs Partially Delivered (purchase_orders_repo.verify_delivery). Composed in the
+    SAME transaction as the Verify itself - same seam insert_transaction already uses to let
+    invoices_repo compose a linked write in one commit - so a PO's served quantities can never
+    drift out of sync with which stock-in transactions are actually Verified. A transaction
+    with no purchaseOrderId (Manual stock-in) or no purchaseOrderItemId on any line (line
+    items entered from the general catalog rather than sourced from the PO) triggers no
+    PO-side effect at all."""
+    conn = get_connection()
+    try:
+        conn.begin()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tbl_warehouse_transactions
+                SET status = 'Verified', verifiedBy = %s, verifiedAt = NOW(),
+                    updatedBy = %s, updatedAt = NOW()
+                WHERE id = %s
+                """,
+                (verified_by, verified_by, txn_id),
+            )
+
+            cur.execute(
+                "SELECT purchaseOrderId, direction FROM tbl_warehouse_transactions WHERE id = %s",
+                (txn_id,),
+            )
+            txn = cur.fetchone()
+
+            if txn and txn["direction"] == "IN" and txn["purchaseOrderId"]:
+                cur.execute(
+                    """
+                    SELECT purchaseOrderItemId, quantity FROM tbl_warehouse_transaction_items
+                    WHERE transactionId = %s AND purchaseOrderItemId IS NOT NULL
+                    """,
+                    (txn_id,),
+                )
+                po_item_updates = [(row["purchaseOrderItemId"], row["quantity"]) for row in cur.fetchall()]
+                if po_item_updates:
+                    purchase_orders_repo.increment_served_quantities(cur, po_item_updates)
+                    cur.execute(
+                        """
+                        UPDATE tbl_purchase_orders
+                        SET status = 'For Verification', updatedBy = %s, updatedAt = NOW()
+                        WHERE id = %s AND status IN ('Printed', 'For Verification', 'Partially Delivered')
+                        """,
+                        (verified_by, txn["purchaseOrderId"]),
+                    )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def finish(txn_id, finished_by):
@@ -418,3 +469,15 @@ def list_stock_balances():
             """
         )
         return cur.fetchall()
+
+
+def get_stock_balance_map():
+    """list_stock_balances(), reshaped into {(itemId, branch, lot, expiryDate): onHand} for
+    O(1) lookup - used both to build the Stock Out item picker's available-lot list and to
+    re-validate a submitted Stock Out's quantities server-side against what's actually on
+    hand (see routes._validate_stock_out_quantities). expiryDate is normalized to its ISO
+    string (or None) so it compares equal to the plain string the form posts back."""
+    return {
+        (row["itemId"], row["branch"], row["lot"], row["expiryDate"].isoformat() if row["expiryDate"] else None): row["onHand"]
+        for row in list_stock_balances()
+    }

@@ -205,7 +205,11 @@ def mark_approved(voucher_id, approved_by):
 
 def mark_paid(voucher_id, paid_by, check_number):
     """Cascades to every payable this voucher covers - same shape as
-    invoices_repo.void_invoice's cascade to its linked warehouse transactions."""
+    invoices_repo.void_invoice's cascade to its linked warehouse transactions. Also cascades
+    one level further, to any PO those payables were raised against: a PO only flips to
+    'Paid' once EVERY payable tied to it (there can be more than one) is Paid, computed live
+    via NOT EXISTS rather than stored redundantly - same reasoning void() already uses for a
+    payable's "claimed" status."""
     conn = get_connection()
     try:
         conn.begin()
@@ -226,6 +230,20 @@ def mark_paid(voucher_id, paid_by, check_number):
                 JOIN tbl_check_voucher_payables cvp ON cvp.payableId = ap.id
                 SET ap.status = 'Paid', ap.updatedBy = %s, ap.updatedAt = NOW()
                 WHERE cvp.voucherId = %s
+                """,
+                (paid_by, voucher_id),
+            )
+            cur.execute(
+                """
+                UPDATE tbl_purchase_orders po
+                JOIN tbl_account_payables ap ON ap.purchaseOrderId = po.id
+                JOIN tbl_check_voucher_payables cvp ON cvp.payableId = ap.id
+                SET po.status = 'Paid', po.updatedBy = %s, po.updatedAt = NOW()
+                WHERE cvp.voucherId = %s
+                  AND NOT EXISTS (
+                      SELECT 1 FROM tbl_account_payables ap2
+                      WHERE ap2.purchaseOrderId = po.id AND ap2.status != 'Paid' AND ap2.isDeleted = 0
+                  )
                 """,
                 (paid_by, voucher_id),
             )

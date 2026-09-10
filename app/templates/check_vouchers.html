@@ -8,7 +8,7 @@
     'Prepared': 'badge-slate',
     'Checked': 'badge-warning',
     'Approved': 'badge-success',
-    'Paid': 'badge-info',
+    'Paid': 'badge-brand',
     'Void': 'badge-accent'
 } %}
 <div class="px-4 py-6 sm:px-6">
@@ -201,6 +201,8 @@
                     <label class="label">Payables to Pay <span class="text-accent-600">*</span></label>
                     <p class="help mb-3" id="payablesHelp">Choose a supplier above to see its Verified, unclaimed payables.</p>
 
+                    <input type="text" class="input mb-2" id="payablesFilterInput"
+                           placeholder="Search PO #, reference, SI/DR #…" autocomplete="off">
                     <div id="payablesPickerList" class="max-h-64 space-y-2 overflow-y-auto"></div>
 
                     <div class="mt-4 space-y-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3
@@ -341,20 +343,48 @@
            items - this selects among EXISTING rows (a supplier's own Verified,
            unclaimed payables), so a plain checkbox list is the right shape. */
         var payablesPickerList = document.getElementById('payablesPickerList');
+        var payablesFilterInput = document.getElementById('payablesFilterInput');
         var payablesHelp = document.getElementById('payablesHelp');
         var voucherSubmitBtn = document.getElementById('voucherSubmitBtn');
 
+        // Selection is tracked here, independent of which rows the filter box is currently
+        // showing - a supplier can have hundreds of payables, so a checked row must stay
+        // checked (and still count toward the totals below) even while it's scrolled out of
+        // view or hidden by a search term, not just while its checkbox happens to be in the
+        // DOM.
+        var allPayables = [];
+        var selectedPayableIds = {};
+
+        function matchesFilter(p, term) {
+            if (!term) return true;
+            term = term.toLowerCase();
+            return [p.poNumber, p.referenceNumber, p.siNumber, p.drNumber, p.description]
+                .some(function (v) { return v && String(v).toLowerCase().indexOf(term) !== -1; });
+        }
+
         function renderPayablesPicker(payables) {
-            payablesPickerList._payables = payables;
-            if (!payables.length) {
+            allPayables = payables;
+            selectedPayableIds = {};
+            renderFilteredList();
+        }
+
+        function renderFilteredList() {
+            var term = payablesFilterInput.value.trim();
+            var visible = allPayables.filter(function (p) { return matchesFilter(p, term); });
+            if (!allPayables.length) {
                 payablesPickerList.innerHTML = '';
                 return;
             }
-            payablesPickerList.innerHTML = payables.map(function (p) {
+            if (!visible.length) {
+                payablesPickerList.innerHTML = '<p class="px-3 py-2 text-sm text-slate-400 dark:text-slate-500">No payables match that search.</p>';
+                return;
+            }
+            payablesPickerList.innerHTML = visible.map(function (p) {
                 var label = (p.poNumber ? p.poNumber + ' — ' : '') + (p.description || p.siNumber || ('Payable #' + p.id));
+                var checked = selectedPayableIds[p.id] ? ' checked' : '';
                 return '<label class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">'
                     + '<span class="flex min-w-0 items-center gap-2">'
-                    + '<input type="checkbox" class="js-payable-check shrink-0" name="payableIds" value="' + p.id + '">'
+                    + '<input type="checkbox" class="js-payable-check shrink-0" name="payableIds" value="' + p.id + '"' + checked + '>'
                     + '<span class="truncate">' + escapeHtml(label) + '</span>'
                     + '</span>'
                     + '<span class="shrink-0 font-medium">' + peso(p.netAmount) + '</span>'
@@ -362,11 +392,10 @@
             }).join('');
         }
 
+        payablesFilterInput.addEventListener('input', renderFilteredList);
+
         function recomputeVoucherTotals() {
-            var payables = payablesPickerList._payables || [];
-            var checkedIds = Array.prototype.slice.call(payablesPickerList.querySelectorAll('.js-payable-check:checked'))
-                .map(function (c) { return c.value; });
-            var selected = payables.filter(function (p) { return checkedIds.indexOf(String(p.id)) !== -1; });
+            var selected = allPayables.filter(function (p) { return selectedPayableIds[p.id]; });
             var total = selected.reduce(function (s, p) { return s + p.amount; }, 0);
             var ewt = selected.reduce(function (s, p) { return s + p.ewtAmount; }, 0);
             var net = selected.reduce(function (s, p) { return s + p.netAmount; }, 0);
@@ -377,11 +406,15 @@
         }
 
         payablesPickerList.addEventListener('change', function (e) {
-            if (e.target.classList.contains('js-payable-check')) recomputeVoucherTotals();
+            if (!e.target.classList.contains('js-payable-check')) return;
+            var id = parseInt(e.target.value, 10);
+            if (e.target.checked) selectedPayableIds[id] = true; else delete selectedPayableIds[id];
+            recomputeVoucherTotals();
         });
 
         document.getElementById('fieldSupplierId').addEventListener('change', function () {
             var supplierId = this.value;
+            payablesFilterInput.value = '';
             if (!supplierId) {
                 renderPayablesPicker([]);
                 payablesHelp.textContent = 'Choose a supplier above to see its Verified, unclaimed payables.';

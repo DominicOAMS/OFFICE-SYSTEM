@@ -24,8 +24,16 @@ def _filter_clauses(search, status):
     sql = " WHERE po.isDeleted = 0"
     params = []
     if status:
-        sql += " AND po.status = %s"
-        params.append(status)
+        # A caller like the Payables PO picker needs "one of several statuses" (e.g.
+        # Delivered OR Partially Delivered) - a list/tuple is accepted alongside the
+        # normal single-status filter used by the PO list page itself.
+        if isinstance(status, (list, tuple, set)):
+            placeholders = ", ".join(["%s"] * len(status))
+            sql += f" AND po.status IN ({placeholders})"
+            params += list(status)
+        else:
+            sql += " AND po.status = %s"
+            params.append(status)
     if search:
         # po.supplierName/branch cover the header; the EXISTS covers a line item's
         # description, which has no rollup column on the header to search instead.
@@ -87,22 +95,40 @@ def list_active_inventory_items():
 
 
 def _next_po_number(cur, year):
-    """Continues the legacy 'YYYY-NNNN' scheme, scoped per year. Computed inside the
-    caller's transaction (same connection, right before the INSERT) rather than as a
-    separate autocommit query, to keep the read-then-insert window as short as possible -
-    this app has no other place that generates a shared sequential business number, so
-    there's no existing helper to reuse."""
-    prefix = f"{year}-"
+    """Continues the legacy 'YYYY-NNNN' scheme, scoped per year. Advances a real row in
+    tbl_po_number_counters with FOR UPDATE immediately before use, inside the caller's
+    transaction (same connection, right before the INSERT) - same "lock, advance, use"
+    shape as check_vouchers_repo.create_voucher's payable row-locking. A bare SELECT MAX(...)
+    (the old approach) has no row to lock, so two POs opened concurrently could compute the
+    same next number; this can't, since the second transaction blocks on the row lock until
+    the first commits its advanced lastSeq."""
     cur.execute(
-        """
-        SELECT MAX(CAST(SUBSTRING(poNumber, 6) AS UNSIGNED)) AS maxSeq
-        FROM tbl_purchase_orders
-        WHERE poNumber LIKE %s
-        """,
-        (prefix + "%",),
+        "INSERT IGNORE INTO tbl_po_number_counters (year, lastSeq) VALUES (%s, 0)",
+        (year,),
     )
-    next_seq = (cur.fetchone()["maxSeq"] or 0) + 1
-    return f"{prefix}{next_seq:04d}"
+    cur.execute(
+        "SELECT lastSeq FROM tbl_po_number_counters WHERE year = %s FOR UPDATE",
+        (year,),
+    )
+    next_seq = cur.fetchone()["lastSeq"] + 1
+    cur.execute(
+        "UPDATE tbl_po_number_counters SET lastSeq = %s WHERE year = %s",
+        (next_seq, year),
+    )
+    return f"{year}-{next_seq:04d}"
+
+
+def preview_next_po_number(year):
+    """A non-locking, display-only preview of the number a PO would get if submitted right
+    now - shown on the Add form so a user isn't left guessing. Not a reservation: two users
+    can see the same preview at once, same as a bank showing a "next check number" that
+    isn't actually reserved until printed. The real, collision-free number is only assigned
+    by _next_po_number inside create_purchase_order's transaction at submit time."""
+    with get_cursor() as cur:
+        cur.execute("SELECT lastSeq FROM tbl_po_number_counters WHERE year = %s", (year,))
+        row = cur.fetchone()
+        last_seq = row["lastSeq"] if row else 0
+        return f"{year}-{last_seq + 1:04d}"
 
 
 def create_purchase_order(data, created_by):
@@ -207,6 +233,150 @@ def create_purchase_order(data, created_by):
         raise
     finally:
         conn.close()
+
+
+def update_purchase_order(po_id, data, updated_by):
+    """Replace the header fields and every line item in one transaction - same shape as
+    create_purchase_order (totals recomputed from data["items"] before they exist as rows)
+    and as warehouse_transactions_repo.update_transaction (delete-then-reinsert items rather
+    than diff, matching how the Add/Edit form always submits a complete list). Only ever
+    offered while status == 'Pending Approval' (enforced by the route, not here) - once a PO
+    is Approved/further along, it represents a decision already acted on, not a draft."""
+    conn = get_connection()
+    try:
+        conn.begin()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tbl_purchase_orders
+                SET orderDate = COALESCE(%s, CURDATE()), supplierId = %s, supplierName = %s,
+                    supplierAddress = %s, supplierTelephone = %s, supplierFax = %s,
+                    supplierEmail = %s, deliveryAddress = %s, deliveryTelephone = %s,
+                    deliveryMobileNumber = %s, deliveryTerm = %s, paymentTerm = %s,
+                    deliveryDate = %s, paymentDueDate = %s, vatableAmount = %s,
+                    vatAmount = %s, totalAmount = %s, priceCode = %s, notes = %s,
+                    attachmentPath = %s, branch = %s,
+                    updatedBy = %s, updatedAt = NOW()
+                WHERE id = %s
+                """,
+                (
+                    data["orderDate"],
+                    data["supplierId"],
+                    data["supplierName"],
+                    data["supplierAddress"],
+                    data["supplierTelephone"],
+                    data["supplierFax"],
+                    data["supplierEmail"],
+                    data["deliveryAddress"],
+                    data["deliveryTelephone"],
+                    data["deliveryMobileNumber"],
+                    data["deliveryTerm"],
+                    data["paymentTerm"],
+                    data["deliveryDate"],
+                    data["paymentDueDate"],
+                    data["vatableAmount"],
+                    data["vatAmount"],
+                    data["totalAmount"],
+                    data["priceCode"],
+                    data["notes"],
+                    data["attachmentPath"],
+                    data["branch"],
+                    updated_by,
+                    po_id,
+                ),
+            )
+
+            cur.execute("DELETE FROM tbl_purchase_order_items WHERE purchaseOrderId = %s", (po_id,))
+            for seq, item in enumerate(data["items"], start=1):
+                cur.execute(
+                    """
+                    INSERT INTO tbl_purchase_order_items
+                        (purchaseOrderId, sequence, itemId, catalogCode, description, unit,
+                         quantity, quantityServed, unitCost, amount)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 0, %s, %s)
+                    """,
+                    (
+                        po_id,
+                        seq,
+                        item["itemId"],
+                        item["catalogCode"],
+                        item["description"],
+                        item["unit"],
+                        item["quantity"],
+                        item["unitCost"],
+                        item["amount"],
+                    ),
+                )
+                item_id = cur.lastrowid
+
+                for alloc in item["allocations"]:
+                    cur.execute(
+                        """
+                        INSERT INTO tbl_purchase_order_item_allocations
+                            (purchaseOrderItemId, customerId, quantity)
+                        VALUES (%s, %s, %s)
+                        """,
+                        (item_id, alloc["customerId"], alloc["quantity"]),
+                    )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def set_status(po_id, status, updated_by):
+    """A plain status flip with no other side effect - used for 'Printed', which legacy
+    also treats as just a flag with no business rule attached beyond gating what comes next
+    (only Printed POs are offered on the Warehouse Transactions Stock-In picker)."""
+    with get_cursor() as cur:
+        cur.execute(
+            "UPDATE tbl_purchase_orders SET status = %s, updatedBy = %s, updatedAt = NOW() WHERE id = %s",
+            (status, updated_by, po_id),
+        )
+
+
+def increment_served_quantities(cur, updates):
+    """Adds delivered quantity onto each PO line's quantityServed, on a cursor the CALLER
+    owns/commits - same seam as warehouse_transactions_repo.insert_transaction taking a
+    caller cursor, so a Stock-In receipt against a PO can increment the PO's lines in the
+    SAME commit as the warehouse transaction itself. updates is a list of
+    (purchase_order_item_id, quantity_received) pairs. Clamped to the ordered quantity so a
+    over-receipt can't push a line's quantityServed past what was actually ordered (legacy's
+    'Over Delivery' state is deliberately not modeled - clamping keeps the two states this
+    app does implement, Delivered/Partially Delivered, always well-defined)."""
+    for po_item_id, qty_received in updates:
+        cur.execute(
+            """
+            UPDATE tbl_purchase_order_items
+            SET quantityServed = LEAST(quantity, quantityServed + %s)
+            WHERE id = %s
+            """,
+            (qty_received, po_item_id),
+        )
+
+
+def verify_delivery(po_id, verified_by):
+    """AP's "did we get what we ordered" check: compares quantityServed against quantity
+    for every line and sets the PO to Delivered (every line fully served) or Partially
+    Delivered otherwise. Only meaningful once status == 'For Verification' (enforced by the
+    route) - i.e. after a Stock-In against this PO has itself been Verified."""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT quantity, quantityServed FROM tbl_purchase_order_items WHERE purchaseOrderId = %s",
+            (po_id,),
+        )
+        items = cur.fetchall()
+        fully_served = all(
+            (item["quantityServed"] or 0) >= (item["quantity"] or 0) for item in items
+        )
+        new_status = "Delivered" if fully_served else "Partially Delivered"
+        cur.execute(
+            "UPDATE tbl_purchase_orders SET status = %s, updatedBy = %s, updatedAt = NOW() WHERE id = %s",
+            (new_status, verified_by, po_id),
+        )
+        return new_status
 
 
 def list_items_for_purchase_orders(po_ids):
